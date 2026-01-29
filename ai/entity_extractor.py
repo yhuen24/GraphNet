@@ -8,9 +8,8 @@ import json
 import re
 import time  # For rate-limit protection
 from typing import List, Dict, Any, Tuple
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, Field
 from config import config
 
@@ -56,22 +55,22 @@ class EntityExtractor:
             Boolean indicating initialization success
         """
         try:
-            if not config.OPENAI_API_KEY:
-                logger.error("OpenAI API key not configured")
+            if not config.GOOGLE_API_KEY:
+                logger.error("Google API key not configured")
                 return False
 
-            self.llm = ChatOpenAI(
-                model=config.OPENAI_MODEL,
+                # Switch to Google Gemini
+            self.llm = ChatGoogleGenerativeAI(
+                model=config.AI_MODEL,
                 temperature=0,
-                openai_api_key=config.OPENAI_API_KEY
+                google_api_key=config.GOOGLE_API_KEY
             )
 
             self.initialized = True
-            logger.info("Entity extractor initialized successfully")
+            logger.info("Entity extractor initialized with Gemini")
             return True
         except Exception as e:
-            logger.error(f"Failed to initialize entity extractor: {str(e)}")
-            self.initialized = False
+            logger.error(f"Failed to initialize: {str(e)}")
             return False
 
     def extract_entities_and_relationships(self, text: str, context: str = None) -> Dict[str, Any]:

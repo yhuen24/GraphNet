@@ -39,7 +39,7 @@ def test_configuration():
             print(f"  - {issue}")
     
     print_info(f"Neo4j URI: {config.NEO4J_URI}")
-    print_info(f"OpenAI Model: {config.OPENAI_MODEL}")
+    print_info(f"AI Model: {config.AI_MODEL}")
     print_info(f"Supported formats: {', '.join(config.SUPPORTED_FORMATS)}")
     
     return validation['valid']

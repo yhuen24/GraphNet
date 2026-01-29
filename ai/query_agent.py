@@ -5,11 +5,11 @@ Handles natural language queries and generates Cypher queries for Neo4j.
 
 import logging
 from typing import List, Dict, Any, Optional
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, SystemMessage
 from config import config
 from graph.graph_manager import GraphManager
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -38,22 +38,22 @@ class QueryAgent:
             Boolean indicating initialization success
         """
         try:
-            if not config.OPENAI_API_KEY:
-                logger.error("OpenAI API key not configured")
+            if not config.GOOGLE_API_KEY:
+                logger.error("Google API key not configured")
                 return False
 
-            self.llm = ChatOpenAI(
+                # Switch to Google Gemini
+            self.llm = ChatGoogleGenerativeAI(
                 model=config.OPENAI_MODEL,
                 temperature=0,
-                openai_api_key=config.OPENAI_API_KEY
+                google_api_key=config.GOOGLE_API_KEY
             )
 
             self.initialized = True
-            logger.info("Query agent initialized successfully")
+            logger.info("Query agent initialized with Gemini")
             return True
         except Exception as e:
-            logger.error(f"Failed to initialize query agent: {str(e)}")
-            self.initialized = False
+            logger.error(f"Failed to initialize: {str(e)}")
             return False
 
     def generate_cypher_query(self, natural_language_query: str) -> Optional[str]:

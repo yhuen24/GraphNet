@@ -21,10 +21,9 @@ class Config:
     NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
     NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
-    
-    # OpenAI Configuration
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+
+    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+    AI_MODEL = os.getenv("AI_MODEL", "gemini-2.5-flash")
     
     # Application Settings
     MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
@@ -49,9 +48,9 @@ class Config:
     def validate(cls) -> Dict[str, Any]:
         """Validate configuration and return status"""
         issues = []
-        
-        if not cls.OPENAI_API_KEY:
-            issues.append("⚠️ OPENAI_API_KEY is not set")
+
+        if not cls.GOOGLE_API_KEY:  # Updated validation
+            issues.append("⚠️ GOOGLE_API_KEY is not set")
         
         if not cls.NEO4J_PASSWORD or cls.NEO4J_PASSWORD == "password":
             issues.append("⚠️ NEO4J_PASSWORD should be changed from default")
@@ -67,7 +66,7 @@ class Config:
         return {
             "neo4j_uri": cls.NEO4J_URI,
             "neo4j_username": cls.NEO4J_USERNAME,
-            "openai_model": cls.OPENAI_MODEL,
+            "ai_model": cls.AI_MODEL,
             "max_file_size_mb": cls.MAX_FILE_SIZE_MB,
             "chunk_size": cls.CHUNK_SIZE,
             "chunk_overlap": cls.CHUNK_OVERLAP,
