@@ -6,7 +6,6 @@ User interface for uploading documents, querying the graph, and visualizing resu
 import streamlit as st
 import os
 from pathlib import Path
-import time
 from typing import List
 import streamlit.components.v1 as components
 

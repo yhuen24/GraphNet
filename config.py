@@ -13,7 +13,10 @@ load_dotenv()
 
 class Config:
     """Configuration class for GraphNet"""
-    
+
+    # Graph Database Mode: 'neo4j' or 'embedded'
+    GRAPH_MODE = os.getenv("GRAPH_MODE", "embedded")  # Default to embedded
+
     # Neo4j Configuration
     NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
