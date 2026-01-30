@@ -42,7 +42,7 @@ class GraphNet:
         self.graph_manager = GraphManager()
         self.entity_extractor = EntityExtractor()
         self.query_agent = None
-        self.visualizer = GraphVisualizer()
+        self.visualizer = GraphVisualizer(self.graph_manager)
         self.document_processor = DocumentProcessor()
         self.initialized = False
 
@@ -161,10 +161,20 @@ class GraphNet:
             entities_added = 0
             relationships_added = 0
 
-            # Add entities
+            # --- MODIFIED STEP 3: NORMALIZE AND ADD ENTITIES ---
             for entity in tqdm(entities, desc="Adding entities"):
+                # 1. Strip whitespace
+                clean_name = entity["name"].strip()
+
+                # 2. Remove "The " prefix (case-insensitive)
+                if clean_name.lower().startswith("the "):
+                    clean_name = clean_name[4:].strip()
+
+                # 3. Standardize to Title Case for consistency
+                clean_name = clean_name.title()
+
                 success = self.graph_manager.create_entity(
-                    entity_name=entity["name"],
+                    entity_name=clean_name,  # Use normalized name
                     entity_type=entity["type"],
                     properties={"description": entity.get("description", "")},
                     source=filename
@@ -172,12 +182,23 @@ class GraphNet:
                 if success:
                     entities_added += 1
 
-            # Add relationships
+            # Add relationships (Make sure to use the same logic here)
             for rel in tqdm(relationships, desc="Adding relationships"):
+                # Normalize source and target names to match the entities above
+                source_clean = rel["source"].strip()
+                if source_clean.lower().startswith("the "):
+                    source_clean = source_clean[4:].strip()
+                source_clean = source_clean.title()
+
+                target_clean = rel["target"].strip()
+                if target_clean.lower().startswith("the "):
+                    target_clean = target_clean[4:].strip()
+                target_clean = target_clean.title()
+
                 success = self.graph_manager.create_relationship(
-                    source_entity=rel["source"],
-                    source_type="Entity",  # Generic type
-                    target_entity=rel["target"],
+                    source_entity=source_clean,
+                    source_type="Entity",
+                    target_entity=target_clean,
                     target_type="Entity",
                     relationship_type=rel["type"].replace(" ", "_").upper(),
                     properties={"description": rel.get("description", "")}
@@ -310,6 +331,10 @@ class GraphNet:
             List of matching entities
         """
         return self.graph_manager.search_entities(search_term)
+
+    def visualize_focused(self, node_name: str):
+        """Bridge method for focused visualization."""
+        return self.visualizer.generate_focused_visualization(node_name)
 
     def clear_graph(self) -> bool:
         """

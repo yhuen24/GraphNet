@@ -341,6 +341,35 @@ def process_documents(uploaded_files: List):
             st.error(f"**{result.get('filename', 'Unknown')}**: {result.get('error', 'Processing failed')}")
 
 
+def execute_query(query: str):
+    with st.spinner("Thinking..."):
+        # 1. Get raw data from the Graph
+        result = st.session_state.graphnet.query(query)
+
+        if result.get('success'):
+            # 2. Convert raw Graph Data into a ChatGPT-style response
+            # We call explain_results which uses Gemini to 'read' the graph output
+            explanation = result.get('explanation', "No explanation generated.")
+
+            st.markdown(f"### 🤖 Answer\n{explanation}")
+
+            # 3. Handle the Visualization
+            results_data = result.get('results', [])
+            if results_data:
+                # Find the main entity name from the results to center the graph
+                focal_node = None
+                # Check different possible result structures
+                first_res = results_data[0]
+                if 'n' in first_res:
+                    focal_node = first_res['n'].get('name')
+                elif 'name' in first_res:
+                    focal_node = first_res.get('name')
+
+                if focal_node:
+                    st.session_state.graphnet.visualize_focused(focal_node)
+
+
+
 def show_query_page():
     """Display query page"""
     st.header("🔍 Query Knowledge Graph")
@@ -387,35 +416,6 @@ def show_query_page():
                     st.write("**Explanation:**", hist['explanation'])
 
 
-def execute_query(query: str):
-    """Execute a natural language query"""
-    with st.spinner("Searching knowledge graph..."):
-        result = st.session_state.graphnet.query(query)
-        
-        st.session_state.query_history.append({
-            'query': query,
-            'result': result,
-            'result_count': result.get('result_count', 0),
-            'explanation': result.get('explanation', '')
-        })
-        
-        if result.get('success'):
-            st.success(f"✅ Found {result.get('result_count', 0)} results")
-            
-            # Show explanation
-            if result.get('explanation'):
-                st.info(f"**Answer:** {result['explanation']}")
-            
-            # Show Cypher query
-            with st.expander("🔧 Generated Cypher Query"):
-                st.code(result.get('query', 'N/A'), language='cypher')
-            
-            # Show results
-            if result.get('results'):
-                st.subheader("Results")
-                st.json(result['results'])
-        else:
-            st.error(f"❌ Query failed: {result.get('error', 'Unknown error')}")
 
 
 def show_visualization_page():

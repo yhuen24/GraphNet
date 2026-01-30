@@ -42,7 +42,7 @@ class QueryAgent:
                 logger.error("Google API key not configured")
                 return False
 
-                # Switch to Google Gemini
+            # Initialize Google Gemini
             self.llm = ChatGoogleGenerativeAI(
                 model=config.AI_MODEL,
                 temperature=0,
@@ -50,95 +50,66 @@ class QueryAgent:
             )
 
             self.initialized = True
-            logger.info("Query agent initialized with Gemini")
+            logger.info(f"Query agent initialized with Gemini ({config.AI_MODEL})")
             return True
         except Exception as e:
             logger.error(f"Failed to initialize: {str(e)}")
             return False
 
     def generate_cypher_query(self, natural_language_query: str) -> Optional[str]:
-        """
-        Convert natural language query to Cypher query
-
-        Args:
-            natural_language_query: User's natural language query
-
-        Returns:
-            Cypher query string or None
-        """
         if not self.initialized:
-            logger.error("Query agent not initialized")
             return None
 
         try:
-            prompt = ChatPromptTemplate.from_messages([
-                SystemMessage(content="""You are an expert at converting natural language questions 
-into Neo4j Cypher queries. Generate ONLY the Cypher query, no explanations.
+            # Pass 1: Categorize Intent and Extract Parameters
+            intent_prompt = ChatPromptTemplate.from_messages([
+                SystemMessage(content="""You are a query intent analyzer. 
+                Your goal is to extract the core 'Entity', 'Relationship Type', and 'Result Limit' 
+                from a user prompt, regardless of how it is phrased.
 
-Common patterns:
-- Find entity: MATCH (e:Type {name: "EntityName"}) RETURN e
-- Find relationships: MATCH (e1)-[r]->(e2) WHERE e1.name = "Name" RETURN e1, r, e2
-- Search: MATCH (e) WHERE e.name CONTAINS "SearchTerm" RETURN e
-- Count: MATCH (n:Type) RETURN count(n)
-- Get related: MATCH (e {name: "Name"})-[r]-(other) RETURN other
+                RULES:
+                1. Identify the subject.
+                2. Identify if the user wants a specific count (e.g., "5", "all", "top").
+                3. If the user uses vague words like "information", "facts", or "details", 
+                   translate this to a 'Neighborhood Search' (all connections).
 
-Entity types in the graph: Person, Organization, Location, Concept, Product, Date, Event, Technology
-Relationship types: WORKS_FOR, LOCATED_IN, RELATED_TO, OWNS, CREATED, MANAGES, PARTICIPATED_IN
+                Generate a clean Cypher query based on these rules. 
+                Use 'toLower()' and 'CONTAINS' for all entity names.
+                Always use '-[r]-' (bi-directional) for relationships.
+                If a number is mentioned, always end with 'LIMIT [number]'.
 
-Generate only the Cypher query without any markdown formatting or explanations."""),
-                HumanMessage(content=f"Convert this question to Cypher: {natural_language_query}")
+                EXAMPLES:
+                - "5 info on company A" -> MATCH (n)-[r]-(m) WHERE toLower(n.name) CONTAINS "company A" RETURN n,r,m LIMIT 5
+                - "Who works for them?" -> MATCH (n)-[r:WORKS_FOR]-(m) WHERE toLower(n.name) CONTAINS "company A" RETURN n,r,m
+                - "Show me everything" -> MATCH (n)-[r]-(m) RETURN n,r,m LIMIT 100
+                """),
+                HumanMessage(content=f"User Prompt: {natural_language_query}")
             ])
 
-            response = self.llm.invoke(prompt.format_messages())
-            cypher_query = response.content.strip()
-
-            # Clean up the query
-            cypher_query = cypher_query.replace("```cypher", "").replace("```", "").strip()
-
-            logger.info(f"Generated Cypher query: {cypher_query}")
-            return cypher_query
-
+            response = self.llm.invoke(intent_prompt.format_messages())
+            return response.content.strip().replace("```cypher", "").replace("```", "")
         except Exception as e:
-            logger.error(f"Error generating Cypher query: {str(e)}")
+            logger.error(f"Error: {e}")
             return None
 
     def process_query(self, natural_language_query: str) -> Dict[str, Any]:
         """
         Process a natural language query and return results
-
-        Args:
-            natural_language_query: User's natural language query
-
-        Returns:
-            Dictionary containing query results and metadata
         """
         if not self.initialized:
-            return {
-                "success": False,
-                "error": "Query agent not initialized",
-                "results": []
-            }
+            return {"success": False, "error": "Query agent not initialized", "results": []}
 
         try:
-            # Generate Cypher query
             cypher_query = self.generate_cypher_query(natural_language_query)
 
             if not cypher_query:
-                return {
-                    "success": False,
-                    "error": "Could not generate Cypher query",
-                    "results": []
-                }
+                return {"success": False, "error": "Could not generate Cypher query", "results": []}
 
-            # Execute query
+            # Execute query against the graph manager
             results = self.graph_manager.query_graph(cypher_query)
 
             # Generate explanation
-            explanation = self.explain_results(
-                natural_language_query,
-                cypher_query,
-                results
-            )
+            explanation = self.explain_results(natural_language_query, cypher_query, results)
 
             return {
                 "success": True,
@@ -150,73 +121,44 @@ Generate only the Cypher query without any markdown formatting or explanations."
 
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-                "results": []
-            }
+            return {"success": False, "error": str(e), "results": []}
 
-    def explain_results(self, natural_query: str, cypher_query: str,
-                       results: List[Dict]) -> str:
+    def explain_results(self, natural_query: str, cypher_query: str, results: List[Dict]) -> str:
         """
         Generate a natural language explanation of query results
-
-        Args:
-            natural_query: Original natural language query
-            cypher_query: Generated Cypher query
-            results: Query results
-
-        Returns:
-            Natural language explanation
         """
         if not self.initialized:
             return "Query agent not initialized"
 
         try:
+            # Provide more context to the explainer LLM
             prompt = ChatPromptTemplate.from_messages([
                 SystemMessage(content="""You are explaining query results from a knowledge graph. 
-Provide a clear, concise explanation of what was found. Be specific and mention entity names."""),
-                HumanMessage(content=f"""
-Original question: {natural_query}
-
-Query executed: {cypher_query}
-
-Results found: {len(results)}
-
-Sample results: {str(results[:3]) if results else "No results"}
-
-Provide a brief, natural explanation of these results.""")
-            ])
+                If results are empty, politely explain that the specific entity or connection wasn't found in the current graph. 
+                If results exist, summarize them clearly."""),
+                                HumanMessage(content=f"""
+                Original question: {natural_query}
+                Query executed: {cypher_query}
+                Results found count: {len(results)}
+                Data found: {str(results[:10])}
+                
+                Provide a natural, helpful response.""")
+                            ])
 
             response = self.llm.invoke(prompt.format_messages())
             return response.content.strip()
 
         except Exception as e:
             logger.error(f"Error explaining results: {str(e)}")
-            return f"Found {len(results)} results"
+            return f"Found {len(results)} results in the knowledge graph."
 
     def get_entity_info(self, entity_name: str) -> Dict[str, Any]:
-        """
-        Get detailed information about an entity
-
-        Args:
-            entity_name: Name of the entity
-
-        Returns:
-            Dictionary with entity information
-        """
+        """Get detailed information about an entity"""
         try:
-            # Get entity details
             entity = self.graph_manager.get_entity(entity_name)
-
-            # Get relationships
             relationships = self.graph_manager.get_entity_relationships(entity_name)
 
-            # Generate summary
-            if self.initialized and entity:
-                summary = self.summarize_entity(entity_name, entity, relationships)
-            else:
-                summary = f"Entity: {entity_name}"
+            summary = self.summarize_entity(entity_name, entity, relationships) if (self.initialized and entity) else f"Entity: {entity_name}"
 
             return {
                 "success": True,
@@ -224,69 +166,32 @@ Provide a brief, natural explanation of these results.""")
                 "relationships": relationships,
                 "summary": summary
             }
-
         except Exception as e:
             logger.error(f"Error getting entity info: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
-    def summarize_entity(self, entity_name: str, entity_data: Dict,
-                        relationships: List[Dict]) -> str:
-        """
-        Generate a natural language summary of an entity
-
-        Args:
-            entity_name: Name of the entity
-            entity_data: Entity properties
-            relationships: List of relationships
-
-        Returns:
-            Natural language summary
-        """
+    def summarize_entity(self, entity_name: str, entity_data: Dict, relationships: List[Dict]) -> str:
+        """Generate a natural language summary of an entity"""
         try:
             prompt = ChatPromptTemplate.from_messages([
-                SystemMessage(content="""You are summarizing information about an entity from a knowledge graph.
-Provide a clear, informative summary mentioning the entity's properties and key relationships."""),
-                HumanMessage(content=f"""
-Entity: {entity_name}
-Properties: {entity_data}
-Relationships: {relationships}
-
-Provide a brief summary of this entity and its connections.""")
+                SystemMessage(content="Summarize this entity and its connections clearly."),
+                HumanMessage(content=f"Entity: {entity_name}\nProperties: {entity_data}\nRelationships: {relationships}")
             ])
-
             response = self.llm.invoke(prompt.format_messages())
             return response.content.strip()
-
         except Exception as e:
             logger.error(f"Error summarizing entity: {str(e)}")
-            return f"{entity_name} - {len(relationships)} relationships"
+            return f"{entity_name} has {len(relationships)} known connections."
 
     def get_suggestions(self, partial_query: str) -> List[str]:
-        """
-        Get query suggestions based on partial input
-
-        Args:
-            partial_query: Partial query from user
-
-        Returns:
-            List of query suggestions
-        """
+        """Get query suggestions"""
         suggestions = [
             "Show me all entities",
             "Find all organizations",
-            "What are the relationships for [entity name]?",
-            "Find entities related to [entity name]",
+            "What are the relationships for [entity]?",
             "Show all people in the graph",
-            "List all locations",
-            "What does [entity name] relate to?",
-            "Find connections between [entity1] and [entity2]"
+            "List all locations"
         ]
-
         if partial_query:
-            # Filter suggestions based on partial query
             suggestions = [s for s in suggestions if partial_query.lower() in s.lower()]
-
         return suggestions[:5]
