@@ -44,7 +44,7 @@ class QueryAgent:
 
                 # Switch to Google Gemini
             self.llm = ChatGoogleGenerativeAI(
-                model=config.OPENAI_MODEL,
+                model=config.AI_MODEL,
                 temperature=0,
                 google_api_key=config.GOOGLE_API_KEY
             )

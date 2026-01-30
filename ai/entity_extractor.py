@@ -1,6 +1,6 @@
 """
 Entity Extractor module for GraphNet.
-Uses LangChain and OpenAI to extract entities and relationships from text.
+Uses LangChain and Google Gemini to extract entities and relationships from text.
 """
 
 import logging

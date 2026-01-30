@@ -210,7 +210,7 @@ def show_home_page():
     ### Requirements
     
     Make sure you have configured:
-    - ✅ OpenAI API Key (for LLM processing)
+    - ✅ Gemini API Key (for LLM processing)
     - ✅ Neo4j Database (running and accessible)
     
     Check the Settings page to verify your configuration.
@@ -230,7 +230,7 @@ def show_home_page():
     with col2:
         st.markdown('<div class="stat-box">', unsafe_allow_html=True)
         api_status = "✅ Configured" if config.GOOGLE_API_KEY else "❌ Not Set"
-        st.markdown(f'<b>OpenAI API</b><br>{api_status}', unsafe_allow_html=True)
+        st.markdown(f'<b>Gemini API</b><br>{api_status}', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col3:
@@ -539,8 +539,8 @@ URI: {config_dict['neo4j_uri']}
 Username: {config_dict['neo4j_username']}
     """)
     
-    st.write("**OpenAI Configuration:**")
-    api_key_status = "✅ Configured" if config.OPENAI_API_KEY else "❌ Not Set"
+    st.write("**Gemini Configuration:**")
+    api_key_status = "✅ Configured" if config.GOOGLE_API_KEY else "❌ Not Set"
     st.code(f"""
 Model: {config_dict['ai_model']}
 API Key: {api_key_status}
