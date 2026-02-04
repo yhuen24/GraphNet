@@ -9,7 +9,6 @@ from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, AuthError
 from config import config
 
-# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -274,11 +273,9 @@ class GraphManager:
                 node_result = session.run("MATCH (n) RETURN count(n) as count")
                 node_count = node_result.single()['count']
                 
-                # Count relationships
                 rel_result = session.run("MATCH ()-[r]->() RETURN count(r) as count")
                 rel_count = rel_result.single()['count']
                 
-                # Get node types
                 type_result = session.run("""
                     MATCH (n)
                     RETURN labels(n) as labels, count(n) as count
@@ -286,7 +283,6 @@ class GraphManager:
                 """)
                 node_types = [record.data() for record in type_result]
                 
-                # Get relationship types
                 rel_type_result = session.run("""
                     MATCH ()-[r]->()
                     RETURN type(r) as type, count(r) as count
@@ -351,7 +347,6 @@ class GraphManager:
                 edges = []
                 
                 for record in result:
-                    # Process source node
                     if record['n']:
                         node_id = record['n'].element_id
                         if node_id not in nodes:
@@ -362,7 +357,6 @@ class GraphManager:
                                 'properties': dict(record['n'])
                             }
                     
-                    # Process relationship and target node
                     if record['r'] and record['m']:
                         target_id = record['m'].element_id
                         if target_id not in nodes:

@@ -66,18 +66,15 @@ class GraphVisualizer:
     def generate_focused_visualization(self, focal_node_name: str):
         net = self._setup_base_network()
 
-        # 1. Find focal node ID
         focal_node_id = self.graph_manager.find_node_id(focal_node_name)
         if not focal_node_id or not self.graph_manager.graph.has_node(focal_node_id):
             logger.warning(f"Node '{focal_node_name}' not found. Showing full graph.")
             return self.create_visualization()
 
-        # 2. Collect neighbors
         neighbors = list(self.graph_manager.graph.successors(focal_node_id))
         predecessors = list(self.graph_manager.graph.predecessors(focal_node_id))
         nodes_to_draw = {focal_node_id} | set(neighbors) | set(predecessors)
 
-        # 3. ADD NODES FIRST
         for node_id in nodes_to_draw:
             node_data = self.graph_manager.graph.nodes[node_id]
             is_focal = node_id == focal_node_id
@@ -95,7 +92,6 @@ class GraphVisualizer:
             )
 
 
-        # 4. ✅ ADD EDGES HERE
         for u, v, key, data in self.graph_manager.graph.edges(keys=True, data=True):
             if u in nodes_to_draw and v in nodes_to_draw:
                 net.add_edge(
@@ -107,7 +103,6 @@ class GraphVisualizer:
                 )
 
 
-        # 5. SAVE + RETURN
         output_path = "graph_visualization.html"
         net.save_graph(output_path)
         return output_path
@@ -137,7 +132,6 @@ class GraphVisualizer:
             directed=True
         )
         
-        # Configure physics
         net.set_options("""
         {
           "physics": {
@@ -162,7 +156,6 @@ class GraphVisualizer:
         }
         """)
         
-        # Add nodes
         for node in graph_data.get('nodes', []):
             node_type = node.get('type', 'Other')
             color = self.colors.get(node_type, self.colors['Other'])
@@ -209,7 +202,6 @@ class GraphVisualizer:
         tooltip = f"<b>{node.get('label', 'Unknown')}</b><br>"
         tooltip += f"<i>Type: {node.get('type', 'Unknown')}</i><br><br>"
         
-        # Add properties
         for key, value in properties.items():
             if key not in ['name', 'id']:
                 tooltip += f"{key}: {value}<br>"
@@ -230,7 +222,6 @@ class GraphVisualizer:
         
         tooltip = f"<b>{edge.get('type', 'Unknown')}</b><br>"
         
-        # Add properties
         for key, value in properties.items():
             tooltip += f"{key}: {value}<br>"
         
@@ -267,7 +258,6 @@ class GraphVisualizer:
         Returns:
             Filtered graph data
         """
-        # Find nodes matching entity names
         selected_nodes = []
         selected_node_ids = set()
         
@@ -276,7 +266,6 @@ class GraphVisualizer:
                 selected_nodes.append(node)
                 selected_node_ids.add(node['id'])
         
-        # Find edges connected to selected nodes
         selected_edges = []
         additional_node_ids = set()
         
@@ -286,7 +275,6 @@ class GraphVisualizer:
                 additional_node_ids.add(edge['source'])
                 additional_node_ids.add(edge['target'])
         
-        # Add connected nodes
         for node in graph_data.get('nodes', []):
             if node['id'] in additional_node_ids and node['id'] not in selected_node_ids:
                 selected_nodes.append(node)
@@ -309,20 +297,17 @@ class GraphVisualizer:
         nodes = graph_data.get('nodes', [])
         edges = graph_data.get('edges', [])
         
-        # Count node types
         node_type_counts = {}
         for node in nodes:
             node_type = node.get('type', 'Other')
             node_type_counts[node_type] = node_type_counts.get(node_type, 0) + 1
         
-        # Count relationship types
         edge_type_counts = {}
         for edge in edges:
             edge_type = edge.get('type', 'Unknown')
             edge_type_counts[edge_type] = edge_type_counts.get(edge_type, 0) + 1
         
-        # Create NetworkX graph for centrality calculations
-        G = nx.DiGraph()
+        G = nx.MultiDiGraph()
         
         for node in nodes:
             G.add_node(node['id'], **node)
@@ -330,12 +315,10 @@ class GraphVisualizer:
         for edge in edges:
             G.add_edge(edge['source'], edge['target'], **edge)
         
-        # Calculate degree centrality
         if len(G.nodes()) > 0:
             centrality = nx.degree_centrality(G)
             top_nodes = sorted(centrality.items(), key=lambda x: x[1], reverse=True)[:5]
             
-            # Map back to node labels
             top_entities = []
             for node_id, score in top_nodes:
                 node_label = None

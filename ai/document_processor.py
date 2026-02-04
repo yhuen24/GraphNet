@@ -41,14 +41,13 @@ class DocumentProcessor:
             Dictionary containing extracted text and metadata
         """
         try:
-            # Determine file extension
+
             if file_path:
                 file_extension = os.path.splitext(file_path)[1].lower()
 
             if not file_extension:
                 raise ValueError("File extension not provided")
 
-            # Route to appropriate processor
             if file_extension in ['.txt', '.md']:
                 return DocumentProcessor._process_text(file_path, file_bytes, filename)
             elif file_extension == '.pdf':
@@ -77,7 +76,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_text(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process plain text files"""
         try:
             if file_bytes:
                 text = file_bytes.decode('utf-8')
@@ -101,7 +99,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_pdf(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process PDF files using pdfplumber for better encoding support"""
         try:
             text = ""
             source = BytesIO(file_bytes) if file_bytes else file_path
@@ -118,7 +115,6 @@ class DocumentProcessor:
                         logger.warning(f"Could not extract text from page {i + 1}: {str(e)}")
                         continue
 
-            # If no text was extracted, raise an error
             if not text.strip():
                 raise ValueError("No text could be extracted from PDF")
 
@@ -139,7 +135,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_docx(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process Word documents"""
         try:
             if file_bytes:
                 doc = DocxDocument(BytesIO(file_bytes))
@@ -175,7 +170,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_xlsx(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process Excel files"""
         try:
             if file_bytes:
                 df_dict = pd.read_excel(BytesIO(file_bytes), sheet_name=None)
@@ -205,7 +199,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_pptx(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process PowerPoint files"""
         try:
             if file_bytes:
                 prs = Presentation(BytesIO(file_bytes))
@@ -236,7 +229,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_csv(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process CSV files"""
         try:
             if file_bytes:
                 df = pd.read_csv(BytesIO(file_bytes))
@@ -263,7 +255,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_json(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process JSON files"""
         try:
             if file_bytes:
                 data = json.loads(file_bytes.decode('utf-8'))

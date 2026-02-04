@@ -6,7 +6,7 @@ Uses LangChain and Google Gemini to extract entities and relationships from text
 import logging
 import json
 import re
-import time  # For rate-limit protection
+import time
 from typing import List, Dict, Any, Tuple
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -92,30 +92,30 @@ class EntityExtractor:
             # Create the extraction prompt
             prompt_template = ChatPromptTemplate.from_messages([
                 ("system", """You are an expert at extracting entities and relationships from text.
-
-Extract all relevant entities (people, organizations, locations, concepts, products, dates, etc.) 
-and their relationships from the given text.
-
-Entity types should be one of: Person, Organization, Location, Concept, Product, Date, Event, Technology, or Other.
-
-Relationship types should be descriptive (e.g., WORKS_FOR, LOCATED_IN, RELATED_TO, OWNS, CREATED, MANAGES, PARTICIPATED_IN).
-
-Return your response as a JSON object with this EXACT structure:
-{{
-    "entities": [
-        {{"name": "Entity Name", "type": "Person", "description": "Brief description"}},
-        ...
-    ],
-    "relationships": [
-        {{"source": "Entity1", "target": "Entity2", "type": "WORKS_FOR", "description": "Brief description"}},
-        ...
-    ]
-}}
-
-Be thorough but precise. Only extract entities and relationships that are clearly mentioned or strongly implied in the text.
-Return ONLY the JSON object, no other text."""),
-                ("user", "Context: {context}\n\nText to analyze:\n{text}")
-            ])
+                
+                Extract all relevant entities (people, organizations, locations, concepts, products, dates, etc.) 
+                and their relationships from the given text.
+                
+                Entity types should be one of: Person, Organization, Location, Concept, Product, Date, Event, Technology, or Other.
+                
+                Relationship types should be descriptive (e.g., WORKS_FOR, LOCATED_IN, RELATED_TO, OWNS, CREATED, MANAGES, PARTICIPATED_IN).
+                
+                Return your response as a JSON object with this EXACT structure:
+                {{
+                    "entities": [
+                        {{"name": "Entity Name", "type": "Person", "description": "Brief description"}},
+                        ...
+                    ],
+                    "relationships": [
+                        {{"source": "Entity1", "target": "Entity2", "type": "WORKS_FOR", "description": "Brief description"}},
+                        ...
+                    ]
+                }}
+                
+                Be thorough but precise. Only extract entities and relationships that are clearly mentioned or strongly implied in the text.
+                Return ONLY the JSON object, no other text."""),
+                                ("user", "Context: {context}\n\nText to analyze:\n{text}")
+                            ])
 
             # Format the prompt
             messages = prompt_template.format_messages(
@@ -184,11 +184,10 @@ Return ONLY the JSON object, no other text."""),
                 # Collect relationships
                 all_relationships.extend(result.get("relationships", []))
 
-            # --- RATE LIMIT PROTECTION ---
-            # If processing more than one chunk, add a delay to avoid 429 errors
+            # rate limit protection
             if i < len(chunks) - 1:
-                logger.info("Waiting 2 seconds to avoid API rate limits...")
-                time.sleep(2)
+                logger.info("Waiting 0.5 seconds to avoid API rate limits...")
+                time.sleep(0.5)
 
         return {
             "entities": list(all_entities.values()),

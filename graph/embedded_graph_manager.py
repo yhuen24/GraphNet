@@ -22,7 +22,7 @@ class EmbeddedGraphManager:
     
     def __init__(self, persist_file: str = "graphnet_data.pkl"):
         """Initialize the embedded graph manager"""
-        self.graph = nx.MultiDiGraph()  # Directed graph with multiple edges
+        self.graph = nx.MultiDiGraph()
         self.persist_file = persist_file
         self.connected = False
         
@@ -34,7 +34,6 @@ class EmbeddedGraphManager:
             Boolean indicating connection status
         """
         try:
-            # Try to load existing graph
             try:
                 with open(self.persist_file, 'rb') as f:
                     self.graph = pickle.load(f)
@@ -87,26 +86,21 @@ class EmbeddedGraphManager:
             return False
         
         try:
-            # Create node ID
             node_id = f"{entity_type}:{entity_name}"
             
-            # Prepare node attributes
             attrs = properties or {}
             attrs['name'] = entity_name
             attrs['type'] = entity_type
             attrs['source'] = source
             
-            # Check if node exists
             if self.graph.has_node(node_id):
-                # Update existing node
                 self.graph.nodes[node_id].update(attrs)
                 self.graph.nodes[node_id]['updated'] = datetime.now().isoformat()
             else:
-                # Create new node
                 attrs['created'] = datetime.now().isoformat()
                 self.graph.add_node(node_id, **attrs)
             
-            self._persist()  # Save after each operation
+            self._persist()
             return True
             
         except Exception as e:
@@ -138,13 +132,11 @@ class EmbeddedGraphManager:
             source_id = f"{source_type}:{source_entity}"
             target_id = f"{target_type}:{target_entity}"
             
-            # Ensure both nodes exist
             if not self.graph.has_node(source_id):
                 self.create_entity(source_entity, source_type)
             if not self.graph.has_node(target_id):
                 self.create_entity(target_entity, target_type)
             
-            # Add edge with properties
             attrs = properties or {}
             attrs['type'] = relationship_type
             attrs['created'] = datetime.now().isoformat()
@@ -173,13 +165,11 @@ class EmbeddedGraphManager:
             return None
         
         try:
-            # Try with type first
             if entity_type:
                 node_id = f"{entity_type}:{entity_name}"
                 if self.graph.has_node(node_id):
                     return dict(self.graph.nodes[node_id])
             
-            # Search all nodes
             for node_id in self.graph.nodes():
                 if self.graph.nodes[node_id].get('name') == entity_name:
                     return dict(self.graph.nodes[node_id])
@@ -205,7 +195,6 @@ class EmbeddedGraphManager:
             return []
         
         try:
-            # Find the node
             node_id = None
             if entity_type:
                 node_id = f"{entity_type}:{entity_name}"
@@ -220,7 +209,6 @@ class EmbeddedGraphManager:
             
             relationships = []
             
-            # Outgoing edges
             for target in self.graph.successors(node_id):
                 for edge_data in self.graph.get_edge_data(node_id, target).values():
                     relationships.append({
@@ -230,7 +218,6 @@ class EmbeddedGraphManager:
                         'direction': 'outgoing'
                     })
             
-            # Incoming edges
             for source in self.graph.predecessors(node_id):
                 for edge_data in self.graph.get_edge_data(source, node_id).values():
                     relationships.append({
@@ -292,13 +279,10 @@ class EmbeddedGraphManager:
             return {}
         
         try:
-            # Count nodes
             node_count = self.graph.number_of_nodes()
             
-            # Count edges
             edge_count = self.graph.number_of_edges()
-            
-            # Count by type
+
             type_counts = {}
             for node_id in self.graph.nodes():
                 node_type = self.graph.nodes[node_id].get('type', 'Unknown')
@@ -308,8 +292,7 @@ class EmbeddedGraphManager:
                 {'labels': [ntype], 'count': count}
                 for ntype, count in sorted(type_counts.items(), key=lambda x: x[1], reverse=True)
             ]
-            
-            # Count relationship types
+
             rel_counts = {}
             for u, v, data in self.graph.edges(data=True):
                 rel_type = data.get('type', 'RELATED_TO')
@@ -367,8 +350,7 @@ class EmbeddedGraphManager:
         try:
             nodes = []
             edges = []
-            
-            # Get nodes (limited)
+
             node_list = list(self.graph.nodes())[:limit]
             
             for node_id in node_list:
@@ -379,8 +361,7 @@ class EmbeddedGraphManager:
                     'type': node_data.get('type', 'Unknown'),
                     'properties': dict(node_data)
                 })
-            
-            # Get edges between these nodes
+
             for u, v, data in self.graph.edges(data=True):
                 if u in node_list and v in node_list:
                     edges.append({
@@ -447,7 +428,7 @@ class EmbeddedGraphManager:
 
         label_lower = node_label.strip().lower()
 
-        # Iterate through nodes to find a name match
+
         for node_id, data in self.graph.nodes(data=True):
             name = data.get("name", "").lower()
             if name == label_lower:

@@ -42,7 +42,6 @@ class QueryAgent:
                 logger.error("Google API key not configured")
                 return False
 
-            # Initialize Google Gemini
             self.llm = ChatGoogleGenerativeAI(
                 model=config.AI_MODEL,
                 temperature=0,
@@ -61,7 +60,6 @@ class QueryAgent:
             return None
 
         try:
-            # Pass 1: Categorize Intent and Extract Parameters
             intent_prompt = ChatPromptTemplate.from_messages([
                 SystemMessage(content="""You are a query intent analyzer. 
                 Your goal is to extract the core 'Entity', 'Relationship Type', and 'Result Limit' 
@@ -105,10 +103,8 @@ class QueryAgent:
             if not cypher_query:
                 return {"success": False, "error": "Could not generate Cypher query", "results": []}
 
-            # Execute query against the graph manager
             results = self.graph_manager.query_graph(cypher_query)
 
-            # Generate explanation
             explanation = self.explain_results(natural_language_query, cypher_query, results)
 
             return {
@@ -131,7 +127,6 @@ class QueryAgent:
             return "Query agent not initialized"
 
         try:
-            # Provide more context to the explainer LLM
             prompt = ChatPromptTemplate.from_messages([
                 SystemMessage(content="""You are explaining query results from a knowledge graph. 
                 If results are empty, politely explain that the specific entity or connection wasn't found in the current graph. 
