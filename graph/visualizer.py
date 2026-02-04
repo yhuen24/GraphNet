@@ -34,16 +34,15 @@ class GraphVisualizer:
         }
 
     def _setup_base_network(self) -> Network:
-        """Helper to create a network with consistent 'Better Look' settings."""
         net = Network(height="700px", width="100%", bgcolor="#222222", font_color="white", directed=True)
-        # Advanced Physics for better spacing and organization
         net.barnes_hut(gravity=-8000, central_gravity=0.3, spring_length=250)
+
+        # Force edges to be bright white by default
         net.set_options("""
         {
-          "interaction": {
-            "hover": true,
-            "navigationButtons": true,
-            "highlightNearest": true
+          "edges": {
+            "color": { "color": "#FFFFFF", "highlight": "#4ECDC4" },
+            "font": { "color": "#FFFFFF", "size": 12 }
           }
         }
         """)
@@ -65,41 +64,55 @@ class GraphVisualizer:
         return self.save_html(net, "graph_visualization.html")
 
     def generate_focused_visualization(self, focal_node_name: str):
-        """Generates a visualization centered on a specific node label."""
         net = self._setup_base_network()
-        data = self.graph_manager.get_graph_data(limit=500)  # Get current graph data
 
-        # 1. Map the Label (e.g. "Dangote Group") to the ID (e.g. "Organization:Dangote Group")
-        focal_node_id = None
-        for node in data['nodes']:
-            if node.get('label').lower() == focal_node_name.lower():
-                focal_node_id = node['id']
-                break
-
-        # 2. Safety Check using has_node
+        # 1. Find focal node ID
+        focal_node_id = self.graph_manager.find_node_id(focal_node_name)
         if not focal_node_id or not self.graph_manager.graph.has_node(focal_node_id):
             logger.warning(f"Node '{focal_node_name}' not found. Showing full graph.")
             return self.create_visualization()
 
-        # 3. Use NetworkX to find immediate neighbors safely
-        neighbors = list(self.graph_manager.graph.neighbors(focal_node_id))
+        # 2. Collect neighbors
+        neighbors = list(self.graph_manager.graph.successors(focal_node_id))
         predecessors = list(self.graph_manager.graph.predecessors(focal_node_id))
-        included_nodes = {focal_node_id} | set(neighbors) | set(predecessors)
+        nodes_to_draw = {focal_node_id} | set(neighbors) | set(predecessors)
 
-        # 4. Add nodes and edges to PyVis
-        for node in data['nodes']:
-            if node['id'] in included_nodes:
-                is_focal = node['id'] == focal_node_id
-                color = "#FFD700" if is_focal else self.colors.get(node.get('type'), self.colors['Other'])
-                net.add_node(node['id'], label=node.get('label'), color=color, size=35 if is_focal else 25)
+        # 3. ADD NODES FIRST
+        for node_id in nodes_to_draw:
+            node_data = self.graph_manager.graph.nodes[node_id]
+            is_focal = node_id == focal_node_id
 
-        for edge in data['edges']:
-            if edge['source'] in included_nodes and edge['target'] in included_nodes:
-                net.add_edge(edge['source'], edge['target'], label=edge.get('type', ''), color="#4ECDC4")
+            node_color = "#FFD700" if is_focal else self.colors.get(
+                node_data.get("type"), "#BDC3C7"
+            )
 
-        return self.save_html(net, "graph_visualization.html")
+            net.add_node(
+                node_id,
+                label=node_data.get("name", node_id),
+                color=node_color,
+                size=35 if is_focal else 25,
+                title=f"Type: {node_data.get('type')}"
+            )
 
-    def create_network(self, graph_data: Dict[str, Any], 
+
+        # 4. ✅ ADD EDGES HERE
+        for u, v, key, data in self.graph_manager.graph.edges(keys=True, data=True):
+            if u in nodes_to_draw and v in nodes_to_draw:
+                net.add_edge(
+                    u,
+                    v,
+                    label=data.get("type", key),
+                    color="#FFFFFF",
+                    width=2
+                )
+
+
+        # 5. SAVE + RETURN
+        output_path = "graph_visualization.html"
+        net.save_graph(output_path)
+        return output_path
+
+    def create_network(self, graph_data: Dict[str, Any],
                       height: str = None, width: str = None) -> Network:
         """
         Create a PyVis network from graph data
@@ -362,20 +375,3 @@ class GraphVisualizer:
         except Exception as e:
             logger.error(f"Error exporting graph data: {str(e)}")
             raise
-
-    def generate_focused_visualization(self, focal_node_id, depth=1):
-        """
-        Creates a subgraph containing only the focal node and its neighbors.
-        """
-        # 1. Get neighbors using NetworkX
-        neighbors = list(self.graph_manager.graph.neighbors(focal_node_id))
-        nodes_to_include = [focal_node_id] + neighbors
-
-        # 2. Create the subgraph
-        subgraph = self.graph_manager.graph.subgraph(nodes_to_include)
-
-        # 3. Add edges explicitly to ensure they appear
-        for source, target, data in subgraph.edges(data=True):
-            self.pyvis_net.add_node(source, label=source, color="red" if source == focal_node_id else "blue")
-            self.pyvis_net.add_node(target, label=target)
-            self.pyvis_net.add_edge(source, target, label=data.get('type', 'RELATED_TO'))

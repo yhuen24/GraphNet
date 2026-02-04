@@ -8,7 +8,6 @@ import pickle
 from typing import List, Dict, Any, Optional
 import networkx as nx
 from datetime import datetime
-import json
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -440,3 +439,20 @@ class EmbeddedGraphManager:
         except Exception as e:
             logger.error(f"Error executing query: {str(e)}")
             return []
+
+    def find_node_id(self, node_label: str):
+        """Finds the internal ID for a given display name."""
+        if not self.connected or not node_label:
+            return None
+
+        label_lower = node_label.strip().lower()
+
+        # Iterate through nodes to find a name match
+        for node_id, data in self.graph.nodes(data=True):
+            name = data.get("name", "").lower()
+            if name == label_lower:
+                return node_id
+        return None
+
+
+
