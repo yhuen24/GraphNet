@@ -5,14 +5,11 @@ Redesigned with a Claude-inspired chat interface.
 
 import streamlit as st
 import os
-import json
 import time
 from pathlib import Path
-from typing import List
 import streamlit.components.v1 as components
 
 from main import GraphNet
-from config import config
 from chat_store import (
     load_all_sessions,
     save_session,

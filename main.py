@@ -18,7 +18,7 @@ from ai.entity_extractor import EntityExtractor, SimpleEntityExtractor
 # Import appropriate graph manager based on configuration
 if config.GRAPH_MODE == "neo4j":
     try:
-        from graph_manager import GraphManager
+        from graph.graph_manager import GraphManager
         logger.info("Using Neo4j graph manager")
     except ImportError:
         logger.warning("Neo4j not available, falling back to embedded mode")

@@ -96,11 +96,7 @@ html, body, [class*="css"] {
     margin: 0.8rem 0 0.3rem;
 }
 
-/* ==========================================================================
-   Fixed layout: top bar + scrollable messages + input bar
-   All three use position:fixed so they're immune to Streamlit's DOM nesting.
-   We use % and calc() — no magic pixel values tied to any screen size.
-   ========================================================================== */
+
 
 /* --- Top bar ------------------------------------------------------------ */
 .chat-top-bar {
@@ -452,10 +448,15 @@ hr { border-color: var(--border) !important; }
 
 
 /* Kill Streamlit's own page scrollbar — only hide on outer wrappers */
-[data-testid="stAppViewContainer"] > section.main,
-section.main > div:first-child {
+[data-testid="stAppViewContainer"] > section.main {
     overflow: hidden !important;
 }
+
+section.main > div:first-child,
+[data-testid="stMainBlockContainer"] {
+    overflow: visible !important;
+}
+
 /* stMainBlockContainer must NOT have overflow:hidden — it wraps .messages-scroll
    and would clip its scrollbar. Use overflow:visible instead. */
 [data-testid="stMainBlockContainer"] {

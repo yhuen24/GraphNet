@@ -335,19 +335,6 @@ class EmbeddedGraphManager:
 
     def get_graph_data(self, limit: int = 100) -> Dict[str, Any]:
         """
-        Get graph data for visualization.
-
-        FIX: The old implementation sliced nodes to [:limit] first, then only
-        kept edges where BOTH endpoints were inside that slice. This meant any
-        node near the slice boundary lost all its edges, producing isolated
-        nodes with no neighbours in the visualizer.
-
-        New approach:
-          1. Start with the first `limit` nodes as seeds.
-          2. Walk every edge in the graph; if either endpoint is a seed, add
-             the edge AND pull both endpoints into the node set.
-          3. Build the final node list from that expanded set, so PyVis always
-             receives matched node-IDs for every edge it is given.
 
         Args:
             limit: Soft cap on the number of seed nodes. The final node count
