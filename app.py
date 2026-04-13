@@ -1,604 +1,559 @@
 """
-Streamlit UI for GraphNet application.
-User interface for uploading documents, querying the graph, and visualizing results.
+GraphNet - AI Knowledge Graph
+Redesigned with a Claude-inspired chat interface.
 """
 
 import streamlit as st
 import os
+import json
+import time
 from pathlib import Path
 from typing import List
 import streamlit.components.v1 as components
 
 from main import GraphNet
 from config import config
-
-# Page configuration
-st.set_page_config(
-    page_title="GraphNet - AI Knowledge Graph",
-    page_icon="🕸️",
-    layout="wide",
-    initial_sidebar_state="expanded"
+from chat_store import (
+    load_all_sessions,
+    save_session,
+    delete_session,
+    new_session,
+    get_session,
 )
 
-# Custom CSS
+# ── Page config ──────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="GraphNet",
+    page_icon="🕸️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ── Global CSS (loaded from styles/graphnet.css) ──────────────────────────────
+def _load_css(path: str) -> None:
+    """Inject a local CSS file into the Streamlit page."""
+    with open(path, "r", encoding="utf-8") as fh:
+        css = fh.read()
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+
+_load_css(Path(__file__).parent / "styles" / "graphnet.css")
+
+# JS: (1) measure sidebar width → CSS var, (2) Enter key submits the form
 st.markdown("""
-    <style>
-    .main-header {
-        font-size: 3rem;
-        font-weight: bold;
-        text-align: center;
-        color: #4ECDC4;
-        margin-bottom: 0.5rem;
+<script>
+(function() {
+    // ── Sidebar width → CSS variable ──────────────────────────────────────
+    function setSidebarSize() {
+        var sidebar = document.querySelector('[data-testid="stSidebar"]');
+        var w = sidebar ? sidebar.getBoundingClientRect().width : 0;
+        document.documentElement.style.setProperty('--sidebar-size', w + 'px');
     }
-    .sub-header {
-        text-align: center;
-        color: #95A5A6;
-        margin-bottom: 2rem;
+    setSidebarSize();
+    window.addEventListener('resize', setSidebarSize);
+    var sidebarObserver = new MutationObserver(setSidebarSize);
+    sidebarObserver.observe(document.body, { childList: true, subtree: true });
+
+    // ── Enter key → click the send button ─────────────────────────────────
+    // Streamlit renders inputs inside iframes sometimes, so we watch for the
+    // input appearing and attach the listener each time it is recreated.
+    function attachEnterListener() {
+        var inputs = document.querySelectorAll('input[type="text"]');
+        inputs.forEach(function(input) {
+            if (input._enterBound) return;   // already attached
+            input._enterBound = true;
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    // Find the send button — it's the button with ↑ label
+                    var btns = document.querySelectorAll('button[kind="primary"], button');
+                    for (var i = 0; i < btns.length; i++) {
+                        if (btns[i].innerText.trim() === '↑') {
+                            btns[i].click();
+                            break;
+                        }
+                    }
+                }
+            });
+        });
     }
-    .stat-box {
-        background-color: #2C3E50;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin: 0.5rem 0;
-    }
-    .stat-label {
-        font-size: 0.9rem;
-        color: #95A5A6;
-    }
-    .stat-value {
-        font-size: 2rem;
-        font-weight: bold;
-        color: #4ECDC4;
-    }
-    .success-box {
-        background-color: #27AE60;
-        padding: 1rem;
-        border-radius: 5px;
-        color: white;
-        margin: 1rem 0;
-    }
-    .error-box {
-        background-color: #E74C3C;
-        padding: 1rem;
-        border-radius: 5px;
-        color: white;
-        margin: 1rem 0;
-    }
-    .info-box {
-        background-color: #3498DB;
-        padding: 1rem;
-        border-radius: 5px;
-        color: white;
-        margin: 1rem 0;
-    }
-    </style>
+    // Run on load and whenever DOM changes (Streamlit rerenders wipe listeners)
+    attachEnterListener();
+    var inputObserver = new MutationObserver(attachEnterListener);
+    inputObserver.observe(document.body, { childList: true, subtree: true });
+})();
+</script>
 """, unsafe_allow_html=True)
 
 
-# Initialize session state
-if 'graphnet' not in st.session_state:
-    st.session_state.graphnet = None
-    st.session_state.initialized = False
-    st.session_state.processed_files = []
-    st.session_state.query_history = []
 
 
-def initialize_graphnet():
-    """Initialize GraphNet application"""
-    if st.session_state.graphnet is None:
-        with st.spinner("Initializing GraphNet..."):
-            st.session_state.graphnet = GraphNet()
-            init_status = st.session_state.graphnet.initialize()
-            st.session_state.initialized = init_status['overall']
-            return init_status
-    return {"overall": st.session_state.initialized}
+
+# ── Session state ──────────────────────────────────────────────────────────────
+def init_state():
+    defaults = {
+        "graphnet":       None,
+        "initialized":    False,
+        "messages":       [],    # active conversation (in-memory mirror of disk)
+        "active_session": None,  # id of the open session
+        "show_graph_for": None,  # msg_id whose graph panel is expanded
+        "view_mode":      "chat", # "chat" or "graph" — per-message toggle
+        "init_attempted": False,
+        "input_key":      0,       # incremented to reset the text input widget
+        "is_thinking":    False,    # query text while waiting, False when idle
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+    # On first page load, always start with a blank new chat.
+    # Past conversations are accessible via the History section in the sidebar.
+    if "sessions_loaded" not in st.session_state:
+        st.session_state.sessions_loaded = True
+
+init_state()
 
 
-def main():
-    """Main Streamlit application"""
-    
-    # Header
-    st.markdown('<p class="main-header">🕸️ GraphNet</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">AI-Powered Knowledge Graph System</p>', unsafe_allow_html=True)
-    
-    # Sidebar
-    with st.sidebar:
-        st.image("https://img.icons8.com/clouds/200/000000/graph.png", width=150)
-        st.title("Navigation")
-        
-        page = st.radio(
-            "Select Page",
-            ["🏠 Home", "📤 Upload Documents", "🔍 Query Graph", 
-             "📊 Visualize", "📈 Statistics", "⚙️ Settings"],
-            label_visibility="collapsed"
-        )
-        
-        st.markdown("---")
-        
-        # Initialize button
-        if st.button("🔄 Initialize/Reconnect", use_container_width=True):
-            with st.spinner("Initializing..."):
-                init_status = initialize_graphnet()
-                
-                if init_status['overall']:
-                    st.success("✓ Connected successfully!")
-                else:
-                    st.error("✗ Initialization failed")
-                    if init_status.get('errors'):
-                        for error in init_status['errors']:
-                            st.error(f"  {error}")
-        
-        # Connection status
-        if st.session_state.initialized:
-            st.success("🟢 Connected")
-        else:
-            st.warning("🔴 Not Connected")
-        
-        st.markdown("---")
-        
-        # Quick stats
-        if st.session_state.initialized and st.session_state.graphnet:
-            st.subheader("Quick Stats")
-            try:
-                stats = st.session_state.graphnet.get_graph_statistics()
-                db_stats = stats.get('database', {})
-                
-                st.metric("Nodes", db_stats.get('node_count', 0))
-                st.metric("Relationships", db_stats.get('relationship_count', 0))
-                st.metric("Files Processed", len(st.session_state.processed_files))
-            except:
-                st.info("Unable to load statistics")
-    
-    # Main content area
-    if page == "🏠 Home":
-        show_home_page()
-    elif page == "📤 Upload Documents":
-        show_upload_page()
-    elif page == "🔍 Query Graph":
-        show_query_page()
-    elif page == "📊 Visualize":
-        show_visualization_page()
-    elif page == "📈 Statistics":
-        show_statistics_page()
-    elif page == "⚙️ Settings":
-        show_settings_page()
-
-
-def show_home_page():
-    """Display home page"""
-    st.header("Welcome to GraphNet")
-    
-    st.markdown("""
-    ### What is GraphNet?
-    
-    GraphNet is an AI-powered knowledge graph system that transforms unstructured corporate data 
-    into structured, explainable, and actionable insights. It combines:
-    
-    - 🤖 **Large Language Models (LLMs)** for intelligent entity extraction
-    - 🔗 **LangChain** for coordinated multi-agent processing
-    - 🗄️ **Neo4j** for powerful graph database storage
-    - 🎨 **Interactive Visualization** for intuitive knowledge exploration
-    
-    ### Key Features
-    
-    1. **📄 Multi-Format Document Processing**
-       - Support for PDF, Word, Excel, PowerPoint, text files, and more
-       - Automatic text extraction and chunking
-    
-    2. **🧠 Intelligent Entity Extraction**
-       - Identifies people, organizations, locations, concepts, and more
-       - Discovers relationships between entities
-       - Source-linked and traceable results
-    
-    3. **💬 Natural Language Querying**
-       - Ask questions in plain English
-       - AI-powered query understanding
-       - Explainable answers with entity connections
-    
-    4. **📊 Graph Visualization**
-       - Interactive network diagrams
-       - Color-coded entity types
-       - Relationship exploration
-    
-    ### Getting Started
-    
-    1. **Initialize**: Click "Initialize/Reconnect" in the sidebar
-    2. **Upload**: Go to "Upload Documents" to add your data
-    3. **Query**: Use "Query Graph" to ask questions
-    4. **Visualize**: Explore the "Visualize" page to see your knowledge graph
-    
-    ### Requirements
-    
-    Make sure you have configured:
-    - ✅ Gemini API Key (for LLM processing)
-    - ✅ Neo4j Database (running and accessible)
-    
-    Check the Settings page to verify your configuration.
-    """)
-    
-    # Status check
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown('<div class="stat-box">', unsafe_allow_html=True)
-        if st.session_state.initialized:
-            st.markdown('✅ <b>System Status</b><br>Ready', unsafe_allow_html=True)
-        else:
-            st.markdown('⚠️ <b>System Status</b><br>Not Initialized', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown('<div class="stat-box">', unsafe_allow_html=True)
-        api_status = "✅ Configured" if config.GOOGLE_API_KEY else "❌ Not Set"
-        st.markdown(f'<b>Gemini API</b><br>{api_status}', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown('<div class="stat-box">', unsafe_allow_html=True)
-        if st.session_state.initialized:
-            db_status = "✅ Connected"
-        else:
-            db_status = "❌ Not Connected"
-        st.markdown(f'<b>Neo4j Database</b><br>{db_status}', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-
-def show_upload_page():
-    """Display document upload page"""
-    st.header("📤 Upload Documents")
-    
-    if not st.session_state.initialized:
-        st.warning("⚠️ Please initialize GraphNet first using the sidebar button.")
+# ── Auto-initialize on first load ──────────────────────────────────────────────
+def auto_initialize():
+    if st.session_state.init_attempted:
         return
-    
-    st.markdown("""
-    Upload your documents to build the knowledge graph. Supported formats:
-    **PDF, DOCX, XLSX, PPTX, TXT, MD, CSV, JSON**
-    """)
-    
-    # File uploader
-    uploaded_files = st.file_uploader(
-        "Choose files to upload",
-        type=['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md', 'csv', 'json'],
-        accept_multiple_files=True
-    )
-    
-    if uploaded_files:
-        st.info(f"📎 {len(uploaded_files)} file(s) selected")
-        
-        if st.button("🚀 Process Documents", type="primary"):
-            process_documents(uploaded_files)
-    
-    # Show processed files
-    if st.session_state.processed_files:
-        st.markdown("---")
-        st.subheader("📋 Processed Files")
-        
-        for file_info in st.session_state.processed_files:
-            with st.expander(f"📄 {file_info['filename']}"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Entities Extracted", file_info.get('entities_extracted', 0))
-                    st.metric("Entities Added", file_info.get('entities_added', 0))
-                with col2:
-                    st.metric("Relationships Extracted", file_info.get('relationships_extracted', 0))
-                    st.metric("Relationships Added", file_info.get('relationships_added', 0))
+    st.session_state.init_attempted = True
+    gn = GraphNet()
+    result = gn.initialize()
+    st.session_state.graphnet = gn
+    st.session_state.initialized = result["overall"]
 
 
-def process_documents(uploaded_files: List):
-    """Process uploaded documents"""
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    total_files = len(uploaded_files)
-    results = []
-    
-    for idx, uploaded_file in enumerate(uploaded_files):
-        status_text.text(f"Processing {uploaded_file.name} ({idx + 1}/{total_files})...")
-        
-        # Get file extension
-        file_extension = Path(uploaded_file.name).suffix
-        
-        # Read file bytes
-        file_bytes = uploaded_file.read()
-        
-        # Process document
-        result = st.session_state.graphnet.process_document(
-            file_bytes=file_bytes,
-            file_extension=file_extension,
-            filename=uploaded_file.name
-        )
-        
-        results.append(result)
-        
-        if result.get('success'):
-            st.session_state.processed_files.append(result)
-        
-        progress_bar.progress((idx + 1) / total_files)
-    
-    status_text.empty()
-    progress_bar.empty()
-    
-    # Show results
-    success_count = sum(1 for r in results if r.get('success'))
-    
-    if success_count == total_files:
-        st.success(f"✅ Successfully processed all {total_files} documents!")
-    elif success_count > 0:
-        st.warning(f"⚠️ Processed {success_count} out of {total_files} documents")
+auto_initialize()
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+def _session_from_state() -> dict:
+    """Build a session dict from current in-memory state."""
+    msgs = st.session_state.messages
+    sid  = st.session_state.active_session
+    # Derive title from first user message
+    title = "New conversation"
+    for m in msgs:
+        if m["role"] == "user":
+            title = (m["content"][:40] + "…") if len(m["content"]) > 40 else m["content"]
+            break
+    return {"id": sid, "title": title, "messages": list(msgs)}
+
+
+def save_current_session() -> None:
+    """Flush the active in-memory conversation to disk."""
+    msgs = st.session_state.messages
+    if not msgs:
+        return
+    sid = st.session_state.active_session
+    if not sid:
+        # Brand-new session — assign an id now
+        sid = str(time.time())
+        st.session_state.active_session = sid
+    sess = _session_from_state()
+    sess["id"] = sid
+    save_session(sess)          # chat_store.save_session writes to disk
+
+
+def start_new_chat() -> None:
+    """Save current conversation and open a blank slate."""
+    save_current_session()
+    st.session_state.messages       = []
+    st.session_state.active_session = None
+    st.session_state.show_graph_for = None
+
+
+def load_session_by_id(sid: str) -> None:
+    """Save current conversation, then load a different one from disk."""
+    save_current_session()
+    sess = get_session(sid)         # chat_store.get_session reads from disk
+    if sess:
+        st.session_state.messages       = list(sess.get("messages", []))
+        st.session_state.active_session = sid
+        st.session_state.show_graph_for = None
+
+
+def delete_session_by_id(sid: str) -> None:
+    """Delete a session from disk and clear state if it was active."""
+    delete_session(sid)             # chat_store.delete_session
+    if st.session_state.active_session == sid:
+        st.session_state.messages       = []
+        st.session_state.active_session = None
+        st.session_state.show_graph_for = None
+
+
+def send_query(query_text):
+    """Run the query against GraphNet and append messages."""
+    if not query_text.strip():
+        return
+
+    # Create a new session id the first time a message is sent
+    if not st.session_state.active_session:
+        sess = new_session(query_text)   # chat_store.new_session
+        st.session_state.active_session = sess["id"]
+
+    msg_id = str(time.time())
+    st.session_state.messages.append({
+        "role": "user",
+        "content": query_text,
+        "msg_id": msg_id + "_u",
+        "entities": [],
+        "relationships": [],
+    })
+
+    gn = st.session_state.graphnet
+    if not gn or not st.session_state.initialized:
+        reply = "⚠️ GraphNet is not initialised. Please check your configuration."
+        entities, relationships = [], []
     else:
-        st.error("❌ Failed to process documents")
-    
-    # Show detailed results
-    for result in results:
-        if result.get('success'):
-            st.info(f"""
-            **{result['filename']}**
-            - Extracted: {result['entities_extracted']} entities, {result['relationships_extracted']} relationships
-            - Added to graph: {result['entities_added']} entities, {result['relationships_added']} relationships
-            """)
+        result = gn.query(query_text)
+        if result.get("success"):
+            explanation = result.get("explanation") or "Query executed successfully."
+            raw = result.get("results", [])
+            # Try to extract entity names from raw results for pills
+            entities = []
+            for row in raw[:20]:
+                for v in row.values():
+                    if isinstance(v, dict) and "name" in v:
+                        entities.append({
+                            "name": v["name"],
+                            "type": (v.get("type") or
+                                     next(iter(v.get("labels", ["Other"])), "Other")),
+                        })
+            entities = list({e["name"]: e for e in entities}.values())
+            relationships = result.get("results", [])
+            reply = explanation
         else:
-            st.error(f"**{result.get('filename', 'Unknown')}**: {result.get('error', 'Processing failed')}")
+            reply = f"❌ {result.get('error', 'Query failed.')}"
+            entities, relationships = [], []
+
+    ai_msg_id = msg_id + "_a"
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": reply,
+        "msg_id": ai_msg_id,
+        "entities": entities,
+        "relationships": relationships,
+    })
+    save_current_session()
 
 
-def execute_query(query: str):
-    with st.spinner("Thinking..."):
-        # 1. Get raw data from the Graph
-        result = st.session_state.graphnet.query(query)
-
-        if result.get('success'):
-            # 2. Convert raw Graph Data into a ChatGPT-style response
-            # We call explain_results which uses Gemini to 'read' the graph output
-            explanation = result.get('explanation', "No explanation generated.")
-
-            st.markdown(f"### 🤖 Answer\n{explanation}")
-
-            # 3. Handle the Visualization
-            results_data = result.get('results', [])
-            if results_data:
-                # Find the main entity name from the results to center the graph
-                focal_node = None
-                # Check different possible result structures
-                first_res = results_data[0]
-                if 'n' in first_res:
-                    focal_node = first_res['n'].get('name')
-                elif 'name' in first_res:
-                    focal_node = first_res.get('name')
-
-                if focal_node:
-                    st.session_state.graphnet.visualize_focused(focal_node)
-
-
-
-def show_query_page():
-    """Display query page"""
-    st.header("🔍 Query Knowledge Graph")
-    
-    if not st.session_state.initialized:
-        st.warning("⚠️ Please initialize GraphNet first using the sidebar button.")
+def process_uploaded_files(files):
+    gn = st.session_state.graphnet
+    if not gn or not st.session_state.initialized:
+        st.error("GraphNet is not initialised.")
         return
-    
-    st.markdown("Ask questions about your data in natural language!")
-    
-    # Query input
-    query = st.text_input(
-        "Enter your question:",
-        placeholder="e.g., 'Show me all organizations' or 'What are the relationships for John Doe?'"
-    )
-    
-    # Example queries
-    with st.expander("💡 Example Queries"):
-        examples = [
-            "Show me all entities",
-            "Find all organizations",
-            "List all people in the graph",
-            "What locations are mentioned?",
-            "Show relationships for [entity name]"
-        ]
-        for example in examples:
-            if st.button(example, key=f"example_{example}"):
-                query = example
-    
-    if query:
-        if st.button("🔍 Search", type="primary"):
-            execute_query(query)
-    
-    # Query history
-    if st.session_state.query_history:
-        st.markdown("---")
-        st.subheader("📜 Query History")
-        
-        for i, hist in enumerate(reversed(st.session_state.query_history[-5:])):
-            with st.expander(f"Query: {hist['query'][:50]}..."):
-                st.write("**Question:**", hist['query'])
-                st.write("**Results:**", hist['result_count'])
-                if hist.get('explanation'):
-                    st.write("**Explanation:**", hist['explanation'])
+
+    total = len(files)
+    bar = st.progress(0, text="Processing…")
+    all_entities = []
+
+    for i, f in enumerate(files):
+        bar.progress((i) / total, text=f"Processing {f.name}…")
+        result = gn.process_document(
+            file_bytes=f.read(),
+            file_extension=Path(f.name).suffix,
+            filename=f.name,
+        )
+        if result.get("success"):
+            all_entities.append(
+                f"**{f.name}** — {result['entities_extracted']} entities, "
+                f"{result['relationships_extracted']} relationships extracted."
+            )
+        else:
+            all_entities.append(f"**{f.name}** — ❌ {result.get('error', 'failed')}")
+        bar.progress((i + 1) / total, text=f"Done: {f.name}")
+
+    bar.empty()
+
+    summary = "\n".join(f"• {line}" for line in all_entities)
+    msg_id = str(time.time())
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": f"📂 **Files processed:**\n{summary}\n\nYou can now ask questions about this data.",
+        "msg_id": msg_id,
+        "entities": [],
+        "relationships": [],
+    })
+    save_current_session()
 
 
-
-
-def show_visualization_page():
-    """Display visualization page"""
-    st.header("📊 Graph Visualization")
-    
-    if not st.session_state.initialized:
-        st.warning("⚠️ Please initialize GraphNet first using the sidebar button.")
+def render_graph(msg):
+    """Inline graph visualisation for a given message's entities/relationships."""
+    gn = st.session_state.graphnet
+    if not gn:
+        st.warning("Not initialised.")
         return
-    
-    st.markdown("Explore your knowledge graph visually!")
-    
-    # Visualization options
-    col1, col2 = st.columns([3, 1])
-    
-    with col2:
-        limit = st.slider("Max nodes to display", 10, 500, 100)
-        
-        if st.button("🎨 Generate Visualization", type="primary"):
-            generate_visualization(limit)
-    
-    # Display visualization
-    if os.path.exists("graph_visualization.html"):
-        with open("graph_visualization.html", 'r', encoding='utf-8') as f:
-            html_content = f.read()
-        
-        components.html(html_content, height=800, scrolling=True)
-    else:
-        st.info("👆 Click 'Generate Visualization' to view your knowledge graph")
 
+    entities = msg.get("entities", [])
+    rels = msg.get("relationships", [])
 
-def generate_visualization(limit: int):
-    """Generate graph visualization"""
-    with st.spinner("Creating visualization..."):
+    if not entities and not rels:
+        # Fall back to fetching full graph
         try:
-            filename = st.session_state.graphnet.visualize_graph(limit=limit)
-            st.success(f"✅ Visualization created: {filename}")
-            st.rerun()
-        except Exception as e:
-            st.error(f"❌ Visualization failed: {str(e)}")
-
-
-def show_statistics_page():
-    """Display statistics page"""
-    st.header("📈 Graph Statistics")
-    
-    if not st.session_state.initialized:
-        st.warning("⚠️ Please initialize GraphNet first using the sidebar button.")
-        return
-    
-    try:
-        stats = st.session_state.graphnet.get_graph_statistics()
-        db_stats = stats.get('database', {})
-        vis_stats = stats.get('visualization', {})
-        
-        # Overview metrics
-        st.subheader("📊 Overview")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Total Nodes", db_stats.get('node_count', 0))
-        with col2:
-            st.metric("Total Relationships", db_stats.get('relationship_count', 0))
-        with col3:
-            st.metric("Files Processed", len(st.session_state.processed_files))
-        with col4:
-            avg_degree = vis_stats.get('avg_degree', 0)
-            st.metric("Avg Connections", f"{avg_degree:.1f}")
-        
-        # Node types
-        st.subheader("🏷️ Entity Types")
-        node_types = db_stats.get('node_types', [])
-        
-        if node_types:
-            for node_type in node_types:
-                labels = node_type.get('labels', ['Unknown'])
-                count = node_type.get('count', 0)
-                st.progress(count / max(1, db_stats.get('node_count', 1)), 
-                           text=f"{labels[0]}: {count}")
-        else:
-            st.info("No entities in the graph yet")
-        
-        # Relationship types
-        st.subheader("🔗 Relationship Types")
-        rel_types = db_stats.get('relationship_types', [])
-        
-        if rel_types:
-            for rel_type in rel_types:
-                rel_name = rel_type.get('type', 'Unknown')
-                count = rel_type.get('count', 0)
-                st.progress(count / max(1, db_stats.get('relationship_count', 1)),
-                           text=f"{rel_name}: {count}")
-        else:
-            st.info("No relationships in the graph yet")
-        
-        # Top entities
-        st.subheader("⭐ Most Connected Entities")
-        top_entities = vis_stats.get('top_entities', [])
-        
-        if top_entities:
-            for entity in top_entities:
-                st.write(f"**{entity.get('name', 'Unknown')}** - Centrality: {entity.get('centrality', 0)}")
-        else:
-            st.info("No entity rankings available")
-        
-    except Exception as e:
-        st.error(f"❌ Error loading statistics: {str(e)}")
-
-
-def show_settings_page():
-    """Display settings page"""
-    st.header("⚙️ Settings")
-    
-    st.subheader("🔧 Configuration")
-    
-    config_dict = config.get_config_dict()
-    
-    st.write("**Neo4j Configuration:**")
-    st.code(f"""
-URI: {config_dict['neo4j_uri']}
-Username: {config_dict['neo4j_username']}
-    """)
-    
-    st.write("**Gemini Configuration:**")
-    api_key_status = "✅ Configured" if config.GOOGLE_API_KEY else "❌ Not Set"
-    st.code(f"""
-Model: {config_dict['ai_model']}
-API Key: {api_key_status}
-    """)
-    
-    st.write("**Processing Settings:**")
-    st.code(f"""
-Max File Size: {config_dict['max_file_size_mb']} MB
-Chunk Size: {config_dict['chunk_size']}
-Chunk Overlap: {config_dict['chunk_overlap']}
-    """)
-    
-    st.write("**Supported Formats:**")
-    st.write(", ".join(config_dict['supported_formats']))
-    
-    st.markdown("---")
-    
-    st.subheader("🗑️ Data Management")
-    
-    st.warning("⚠️ Danger Zone")
-    
-    if st.button("🗑️ Clear All Graph Data", type="secondary"):
-        if st.checkbox("I understand this will delete all data"):
-            if st.session_state.initialized:
-                with st.spinner("Clearing graph..."):
-                    success = st.session_state.graphnet.clear_graph()
-                    if success:
-                        st.success("✅ Graph data cleared")
-                        st.session_state.processed_files = []
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to clear graph")
+            fname = gn.visualize_graph(limit=80)
+            if os.path.exists(fname):
+                with open(fname, "r", encoding="utf-8") as fh:
+                    components.html(fh.read(), height=620, scrolling=True)
             else:
-                st.error("❌ Please initialize GraphNet first")
-    
+                st.info("No graph data available yet.")
+        except Exception as e:
+            st.error(f"Visualisation error: {e}")
+        return
+
+    # Build a mini vis with pyvis directly
+    try:
+        from pyvis.network import Network
+        net = Network(height="600px", width="100%", bgcolor="#17171a",
+                      font_color="#e8e8ec", directed=True)
+        net.set_options("""{
+          "physics":{"enabled":true,"stabilization":{"iterations":120}},
+          "interaction":{"hover":true,"navigationButtons":true,"zoomView":true},
+          "edges":{"color":{"color":"#aaaaaa","highlight":"#ffffff","hover":"#ffffff"},"width":1.5,"smooth":{"type":"dynamic"}}
+        }""")
+
+        COLORS = {
+            "Person": "#a89cf9", "Organization": "#7df3e4",
+            "Location": "#fbbf24", "Concept": "#f472b6",
+            "Product": "#4ade80", "Technology": "#60a5fa",
+        }
+        added = set()
+        for e in entities:
+            nid = e["name"]
+            if nid not in added:
+                color = COLORS.get(e.get("type", "Other"), "#9b9baa")
+                net.add_node(nid, label=nid, color=color, size=22,
+                             title=f"{e.get('type','?')}: {nid}")
+                added.add(nid)
+
+        for r in rels[:30]:
+            s = r.get("source") or r.get("e1", {})
+            t = r.get("target") or r.get("e2", {})
+            rel_type = r.get("relationship") or r.get("type", "RELATED")
+            if isinstance(s, dict): s = s.get("name", "")
+            if isinstance(t, dict): t = t.get("name", "")
+            if s and t:
+                for nid in [s, t]:
+                    if nid not in added:
+                        net.add_node(nid, label=nid, color="#9b9baa", size=18)
+                        added.add(nid)
+                net.add_edge(s, t, label=str(rel_type),
+                             color={"color": "#cccccc", "highlight": "#ffffff", "hover": "#ffffff"},
+                             width=1.5, arrows="to")
+
+        html_str = net.generate_html()
+        # scrolling=True lets the user scroll within the graph iframe
+        components.html(html_str, height=620, scrolling=True)
+
+    except Exception as e:
+        st.error(f"Visualisation error: {e}")
+
+
+# ── Sidebar ────────────────────────────────────────────────────────────────────
+with st.sidebar:
+    # Brand
+    st.markdown("""
+    <div class="sidebar-brand">
+        <span class="icon">🕸️</span>
+        <span class="name">GraphNet</span>
+    </div>""", unsafe_allow_html=True)
+
+    # New chat button
+    if st.button("＋  New chat", use_container_width=True):
+        start_new_chat()
+        st.rerun()
+
+    # Upload section
+    st.markdown('<div class="sidebar-section-label">Upload documents</div>',
+                unsafe_allow_html=True)
+
+    uploaded = st.file_uploader(
+        "Drop files here",
+        type=["pdf", "docx", "xlsx", "pptx", "txt", "md", "csv", "json"],
+        accept_multiple_files=True,
+        label_visibility="collapsed",
+    )
+
+    if uploaded:
+        if st.button("Process files", use_container_width=True):
+            process_uploaded_files(uploaded)
+            st.rerun()
+
+    # Chat history (loaded fresh from disk on every render)
+    all_sessions = load_all_sessions()
+    if all_sessions:
+        st.markdown('<div class="sidebar-section-label">History</div>',
+                    unsafe_allow_html=True)
+        for s in all_sessions[:30]:
+            label = s["title"][:34] + ("…" if len(s["title"]) > 34 else "")
+            is_active = s["id"] == st.session_state.active_session
+            # Row: load button + delete button
+            col_l, col_d = st.columns([9, 1])
+            with col_l:
+                btn_label = f"{'▶ ' if is_active else '💬  '}{label}"
+                if st.button(btn_label, key=f"hist_{s['id']}",
+                             use_container_width=True):
+                    load_session_by_id(s["id"])
+                    st.rerun()
+            with col_d:
+                if st.button("✕", key=f"del_{s['id']}"):
+                    delete_session_by_id(s["id"])
+                    st.rerun()
+
+    # Connection status at bottom
     st.markdown("---")
-    
-    st.subheader("📥 Export Data")
-    
-    if st.button("💾 Export Graph to JSON"):
-        if st.session_state.initialized:
-            with st.spinner("Exporting..."):
-                try:
-                    filename = st.session_state.graphnet.export_graph()
-                    st.success(f"✅ Graph exported to {filename}")
-                    
-                    with open(filename, 'r') as f:
-                        st.download_button(
-                            "⬇️ Download JSON",
-                            f,
-                            file_name=filename,
-                            mime="application/json"
-                        )
-                except Exception as e:
-                    st.error(f"❌ Export failed: {str(e)}")
+    if st.session_state.initialized:
+        st.markdown(
+            '<span class="status-dot"></span>'
+            '<span style="font-size:0.75rem;color:#6b6b78;">Connected</span>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<span class="status-dot status-offline"></span>'
+            '<span style="font-size:0.75rem;color:#6b6b78;">Not connected</span>',
+            unsafe_allow_html=True,
+        )
+        if st.button("Retry connection", use_container_width=True):
+            gn = GraphNet()
+            result = gn.initialize()
+            st.session_state.graphnet = gn
+            st.session_state.initialized = result["overall"]
+            st.rerun()
+
+
+# ── Top bar ────────────────────────────────────────────────────────────────────
+_status = (
+    '<span class="status-dot"></span> Ready'
+    if st.session_state.initialized
+    else '<span class="status-dot status-offline"></span> Initialising…'
+)
+st.markdown(f'''
+<div class="chat-top-bar">
+    <h2>GraphNet</h2>
+    <div style="font-size:0.78rem;color:var(--muted);">{_status}</div>
+</div>
+''', unsafe_allow_html=True)
+
+messages = st.session_state.messages
+
+
+# ── Message renderer ──────────────────────────────────────────────────────────────────────────────
+def render_messages():
+    if not messages:
+        st.markdown("""
+        <div class="welcome">
+            <div class="welcome-icon">🕸️</div>
+            <h1>What do you want to know?</h1>
+            <p>Upload documents and ask questions.<br>
+               GraphNet surfaces entities, relationships, and insights from your data.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+
+    for msg in messages:
+        role     = msg["role"]
+        content  = msg["content"]
+        mid      = msg.get("msg_id", "")
+        entities = msg.get("entities", [])
+
+        if role == "user":
+            st.markdown(f"""
+            <div class="message-row user">
+                <div class="avatar user">You</div>
+                <div><div class="bubble user">{content}</div></div>
+            </div>""", unsafe_allow_html=True)
+
         else:
-            st.error("❌ Please initialize GraphNet first")
+            # --- per-message view state ---
+            view_key = f"view_{mid}"
+            if view_key not in st.session_state:
+                st.session_state[view_key] = "chat"
+            is_graph = st.session_state[view_key] == "graph"
+
+            # Toggle row — ALWAYS rendered first, before any content,
+            # so it is never pushed off-screen by a tall graph panel.
+            st.markdown('<div class="toggle-row">', unsafe_allow_html=True)
+            tc1, tc2, _ = st.columns([1, 1, 10])
+            with tc1:
+                if st.button(
+                    "💬 Answer",
+                    key=f"chat_tab_{mid}",
+                    type="primary" if not is_graph else "secondary",
+                ):
+                    st.session_state[view_key] = "chat"
+                    st.rerun()
+            with tc2:
+                if st.button(
+                    "⬡ Graph",
+                    key=f"graph_tab_{mid}",
+                    type="primary" if is_graph else "secondary",
+                ):
+                    st.session_state[view_key] = "graph"
+                    st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            # Build entity pills HTML
+            pills_html = ""
+            if entities:
+                pills_html = '<div class="entity-pills">'
+                for e in entities[:12]:
+                    etype = e.get("type", "Other")
+                    pills_html += f'<span class="entity-pill pill-{etype}">{e["name"]}</span>'
+                pills_html += "</div>"
+
+            if not is_graph:
+                # Chat answer view
+                st.markdown(f"""
+                <div class="message-row">
+                    <div class="avatar ai">GN</div>
+                    <div style="flex:1;min-width:0">
+                        <div class="bubble ai">{content}{pills_html}</div>
+                        <div class="bubble-meta">GraphNet</div>
+                    </div>
+                </div>""", unsafe_allow_html=True)
+            else:
+                # Graph view
+                st.markdown('<div class="message-row"><div class="avatar ai">GN</div><div style="flex:1;min-width:0">', unsafe_allow_html=True)
+                st.markdown('<div class="graph-panel">', unsafe_allow_html=True)
+                render_graph(msg)
+                st.markdown('</div></div></div>', unsafe_allow_html=True)
 
 
-if __name__ == "__main__":
-    main()
+# Phase 2 — process stored query now that thinking indicator has rendered
+if st.session_state.is_thinking:
+    _q = st.session_state.is_thinking
+    st.session_state.is_thinking = False
+    send_query(_q)
+    st.rerun()
+
+st.markdown('<div class="messages-scroll">', unsafe_allow_html=True)
+render_messages()
+# Show animated thinking indicator while waiting for LLM response
+if st.session_state.is_thinking:
+    st.markdown('<div class="thinking-row"><div class="avatar ai">GN</div><div class="thinking-bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ── Input bar ──────────────────────────────────────────────────────────────────────────────
+
+st.markdown('<div class="input-bar"><div class="input-bar-inner">', unsafe_allow_html=True)
+
+_, inner_left, col_input, col_btn, inner_right, _ = st.columns([1, 0.05, 6, 0.5, 0.05, 1])
+with col_input:
+    query = st.text_input(
+        "query",
+        placeholder="Ask anything about your documents…",
+        label_visibility="collapsed",
+        key=f"chat_input_{st.session_state.input_key}",
+    )
+with col_btn:
+    send = st.button("↑", key="send_btn")
+
+st.markdown("</div></div>", unsafe_allow_html=True)
+
+# Send on button click OR Enter (Enter is handled by JS which clicks the button)
+if send and query and not st.session_state.is_thinking:
+    st.session_state.is_thinking = query
+    st.session_state.input_key += 1
+    st.rerun()

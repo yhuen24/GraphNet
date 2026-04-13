@@ -280,14 +280,13 @@ class EmbeddedGraphManager:
         
         try:
             node_count = self.graph.number_of_nodes()
-            
             edge_count = self.graph.number_of_edges()
 
             type_counts = {}
             for node_id in self.graph.nodes():
                 node_type = self.graph.nodes[node_id].get('type', 'Unknown')
                 type_counts[node_type] = type_counts.get(node_type, 0) + 1
-            
+
             node_types = [
                 {'labels': [ntype], 'count': count}
                 for ntype, count in sorted(type_counts.items(), key=lambda x: x[1], reverse=True)
@@ -297,63 +296,97 @@ class EmbeddedGraphManager:
             for u, v, data in self.graph.edges(data=True):
                 rel_type = data.get('type', 'RELATED_TO')
                 rel_counts[rel_type] = rel_counts.get(rel_type, 0) + 1
-            
+
             rel_types = [
                 {'type': rtype, 'count': count}
                 for rtype, count in sorted(rel_counts.items(), key=lambda x: x[1], reverse=True)
             ]
-            
+
             return {
                 'node_count': node_count,
                 'relationship_count': edge_count,
                 'node_types': node_types,
                 'relationship_types': rel_types
             }
-            
+
         except Exception as e:
             logger.error(f"Error getting graph stats: {str(e)}")
             return {}
-    
+
     def clear_graph(self) -> bool:
         """
         Clear all nodes and relationships from the graph
-        
+
         Returns:
             Boolean indicating success
         """
         if not self.connected:
             return False
-        
+
         try:
             self.graph.clear()
             self._persist()
             logger.info("Graph cleared successfully")
             return True
-            
+
         except Exception as e:
             logger.error(f"Error clearing graph: {str(e)}")
             return False
-    
+
     def get_graph_data(self, limit: int = 100) -> Dict[str, Any]:
         """
-        Get graph data for visualization
-        
+        Get graph data for visualization.
+
+        FIX: The old implementation sliced nodes to [:limit] first, then only
+        kept edges where BOTH endpoints were inside that slice. This meant any
+        node near the slice boundary lost all its edges, producing isolated
+        nodes with no neighbours in the visualizer.
+
+        New approach:
+          1. Start with the first `limit` nodes as seeds.
+          2. Walk every edge in the graph; if either endpoint is a seed, add
+             the edge AND pull both endpoints into the node set.
+          3. Build the final node list from that expanded set, so PyVis always
+             receives matched node-IDs for every edge it is given.
+
         Args:
-            limit: Maximum number of nodes to return
-        
+            limit: Soft cap on the number of seed nodes. The final node count
+                   may be slightly higher because neighbours of seed nodes are
+                   always included to keep edges intact.
+
         Returns:
-            Dictionary containing nodes and edges
+            Dictionary containing nodes and edges.
         """
         if not self.connected:
             return {"nodes": [], "edges": []}
-        
-        try:
-            nodes = []
-            edges = []
 
-            node_list = list(self.graph.nodes())[:limit]
-            
-            for node_id in node_list:
+        try:
+            # --- Step 1: seed set (respects the caller's limit) ---
+            seed_nodes: set = set(list(self.graph.nodes())[:limit])
+
+            # --- Step 2: collect edges + pull in neighbour nodes ---
+            edges = []
+            node_set: set = set(seed_nodes)  # will grow as neighbours are added
+
+            for u, v, data in self.graph.edges(data=True):
+                # Include the edge if at least one endpoint is a seed node
+                if u in seed_nodes or v in seed_nodes:
+                    node_set.add(u)   # ensure source node is present
+                    node_set.add(v)   # ensure target node is present
+                    edges.append({
+                        'source': u,
+                        'target': v,
+                        'type': data.get('type', 'RELATED_TO'),
+                        'properties': dict(data)
+                    })
+
+            # --- Step 3: build node list from the now-complete node_set ---
+            nodes = []
+            for node_id in node_set:
+                if not self.graph.has_node(node_id):
+                    # Safety check – should never happen, but guard anyway
+                    logger.warning(f"Node '{node_id}' referenced by an edge but missing from graph")
+                    continue
                 node_data = self.graph.nodes[node_id]
                 nodes.append({
                     'id': node_id,
@@ -362,61 +395,48 @@ class EmbeddedGraphManager:
                     'properties': dict(node_data)
                 })
 
-            for u, v, data in self.graph.edges(data=True):
-                if u in node_list and v in node_list:
-                    edges.append({
-                        'source': u,
-                        'target': v,
-                        'type': data.get('type', 'RELATED_TO'),
-                        'properties': dict(data)
-                    })
-            
-            return {
-                "nodes": nodes,
-                "edges": edges
-            }
-            
+            logger.info(
+                f"get_graph_data → {len(nodes)} nodes, {len(edges)} edges "
+                f"(seed limit={limit}, neighbours pulled in={len(node_set) - len(seed_nodes)})"
+            )
+
+            return {"nodes": nodes, "edges": edges}
+
         except Exception as e:
             logger.error(f"Error getting graph data: {str(e)}")
             return {"nodes": [], "edges": []}
-    
+
     def query_graph(self, query: str, parameters: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """
-        Execute a simple query (limited functionality compared to Cypher)
-        
-        This is a simplified query interface for basic operations.
-        For complex queries, use the specific methods.
-        
+        Execute a simple query (limited functionality compared to Cypher).
+
         Args:
             query: Simple query string
             parameters: Query parameters
-        
+
         Returns:
             List of results
         """
         if not self.connected:
             return []
-        
+
         try:
             results = []
             query_lower = query.lower()
-            
-            # Simple pattern matching for common queries
+
             if 'match (n)' in query_lower or 'show' in query_lower or 'all' in query_lower:
-                # Return all nodes
                 for node_id in list(self.graph.nodes())[:100]:
                     results.append({
                         'n': dict(self.graph.nodes[node_id])
                     })
-            
+
             elif 'count' in query_lower:
-                # Return count
                 results.append({
                     'count': self.graph.number_of_nodes()
                 })
-            
+
             return results
-            
+
         except Exception as e:
             logger.error(f"Error executing query: {str(e)}")
             return []
@@ -428,12 +448,8 @@ class EmbeddedGraphManager:
 
         label_lower = node_label.strip().lower()
 
-
         for node_id, data in self.graph.nodes(data=True):
             name = data.get("name", "").lower()
             if name == label_lower:
                 return node_id
         return None
-
-
-
