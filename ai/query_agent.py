@@ -42,6 +42,7 @@ class QueryAgent:
                 logger.error("Google API key not configured")
                 return False
 
+                # Switch to Google Gemini
             self.llm = ChatGoogleGenerativeAI(
                 model=config.AI_MODEL,
                 temperature=0,
@@ -49,7 +50,7 @@ class QueryAgent:
             )
 
             self.initialized = True
-            logger.info(f"Query agent initialized with Gemini ({config.AI_MODEL})")
+            logger.info("Query agent initialized with Gemini")
             return True
         except Exception as e:
             logger.error(f"Failed to initialize: {str(e)}")
@@ -74,35 +75,15 @@ class QueryAgent:
                 SystemMessage(content="""You are an expert at converting natural language questions 
 into Neo4j Cypher queries. Generate ONLY the Cypher query, no explanations.
 
-CRITICAL RULES FOR QUERY GENERATION:
-1. ALWAYS use case-insensitive matching with toLower() and CONTAINS for searching by name.
-   - CORRECT: WHERE toLower(n.name) CONTAINS toLower("dangote")
-   - WRONG: WHERE n.name = "Dangote Group"
-2. When searching for an entity, search ALL nodes regardless of label.
-   - CORRECT: MATCH (n) WHERE toLower(n.name) CONTAINS toLower("dangote")
-   - WRONG: MATCH (n:Organization {name: "Dangote Group"})
-3. To find relationships and connected entities, use this pattern:
-   MATCH (n)-[r]-(m) WHERE toLower(n.name) CONTAINS toLower("search term") RETURN n, r, m
-4. Always include LIMIT to prevent returning too many results.
-5. ALWAYS return n.source (the source document) in your query results. This is critical for traceability.
-6. When asked for "information about X", return the entity AND all its relationships WITH sources:
-   MATCH (n)-[r]-(m) WHERE toLower(n.name) CONTAINS toLower("X") RETURN n.name AS entity, n.source AS source, type(r) AS relationship, m.name AS connected_entity, m.source AS connected_source, labels(n) AS entity_type, labels(m) AS connected_type LIMIT 25
-7. When asked to "show all" or "list all" of a type, match by label and include source:
-   MATCH (n:Person) RETURN n.name AS name, n.source AS source, n.description AS description, labels(n) AS type LIMIT 25
-8. For counting queries:
-   MATCH (n:Organization) RETURN count(n) AS count
-9. For single entity queries without relationships:
-   MATCH (n) WHERE toLower(n.name) CONTAINS toLower("X") RETURN n.name AS name, n.source AS source, n.description AS description, labels(n) AS type LIMIT 10
+Common patterns:
+- Find entity: MATCH (e:Type {name: "EntityName"}) RETURN e
+- Find relationships: MATCH (e1)-[r]->(e2) WHERE e1.name = "Name" RETURN e1, r, e2
+- Search: MATCH (e) WHERE e.name CONTAINS "SearchTerm" RETURN e
+- Count: MATCH (n:Type) RETURN count(n)
+- Get related: MATCH (e {name: "Name"})-[r]-(other) RETURN other
 
-Common query patterns:
-- "Tell me about X" → Find X and all its connections with sources
-- "What is related to X" → Find all nodes connected to X with sources
-- "Find all people" → MATCH (n:Person) RETURN n.name AS name, n.source AS source, labels(n) AS type LIMIT 25
-- "How are X and Y connected" → MATCH path = shortestPath((a)-[*]-(b)) WHERE toLower(a.name) CONTAINS toLower("X") AND toLower(b.name) CONTAINS toLower("Y") RETURN path LIMIT 10
-- "Show relationships for X" → MATCH (n)-[r]-(m) WHERE toLower(n.name) CONTAINS toLower("X") RETURN n.name AS entity, n.source AS source, type(r) AS relationship, m.name AS connected_entity, m.source AS connected_source LIMIT 25
-
-Entity types in the graph: Person, Organization, Location, Concept, Product, Date, Event, Technology, Process, Other
-Relationship types: WORKS_FOR, LOCATED_IN, RELATED_TO, OWNS, CREATED, MANAGES, PARTICIPATED_IN, PRODUCES, OPERATES_IN, SUBSIDIARY_OF, FOUNDED, HAS, IS_A, PART_OF, SUPPLIES, INVESTED_IN
+Entity types in the graph: Person, Organization, Location, Concept, Product, Date, Event, Technology
+Relationship types: WORKS_FOR, LOCATED_IN, RELATED_TO, OWNS, CREATED, MANAGES, PARTICIPATED_IN
 
 Generate only the Cypher query without any markdown formatting or explanations."""),
                 HumanMessage(content=f"Convert this question to Cypher: {natural_language_query}")
@@ -152,24 +133,11 @@ Generate only the Cypher query without any markdown formatting or explanations."
             # Execute query
             results = self.graph_manager.query_graph(cypher_query)
 
-            # If no results, try a broader fallback search
-            if not results:
-                logger.info("No results from generated query, trying fallback search...")
-                fallback_query = self._generate_fallback_query(natural_language_query)
-                if fallback_query:
-                    results = self.graph_manager.query_graph(fallback_query)
-                    if results:
-                        cypher_query = fallback_query
-
-            # Extract unique source documents from results
-            sources = self._extract_sources(results)
-
             # Generate explanation
             explanation = self.explain_results(
                 natural_language_query,
                 cypher_query,
-                results,
-                sources
+                results
             )
 
             return {
@@ -177,8 +145,7 @@ Generate only the Cypher query without any markdown formatting or explanations."
                 "query": cypher_query,
                 "results": results,
                 "explanation": explanation,
-                "result_count": len(results),
-                "sources": sources
+                "result_count": len(results)
             }
 
         except Exception as e:
@@ -189,72 +156,8 @@ Generate only the Cypher query without any markdown formatting or explanations."
                 "results": []
             }
 
-    def _extract_sources(self, results: List[Dict]) -> List[str]:
-        """
-        Extract unique source document names from query results.
-
-        Args:
-            results: Query results
-
-        Returns:
-            List of unique source document names
-        """
-        sources = set()
-        for record in results:
-            for key, value in record.items():
-                # Check string values for source fields
-                if 'source' in key.lower() and isinstance(value, str) and value:
-                    sources.add(value)
-                # Check if the value is a node dict with a source property
-                elif isinstance(value, dict) and value.get('source'):
-                    sources.add(value['source'])
-        return sorted(list(sources))
-
-    def _generate_fallback_query(self, natural_language_query: str) -> Optional[str]:
-        """
-        Generate a broad fallback query by extracting key terms
-        and doing a simple CONTAINS search across all nodes and relationships.
-
-        Args:
-            natural_language_query: Original query
-
-        Returns:
-            Fallback Cypher query or None
-        """
-        try:
-            # Ask LLM to extract the main search term
-            prompt = ChatPromptTemplate.from_messages([
-                SystemMessage(content="""Extract the main entity or search term from this question.
-Return ONLY the search term, nothing else. No quotes, no explanation.
-For example:
-- "Tell me about Dangote Group" → dangote
-- "Where is Apple located?" → apple
-- "Who works for Microsoft?" → microsoft
-- "Show me all people" → return NONE
-- "List all organizations" → return NONE"""),
-                HumanMessage(content=natural_language_query)
-            ])
-
-            response = self.llm.invoke(prompt.format_messages())
-            search_term = response.content.strip().lower()
-
-            if search_term and search_term != "none":
-                return f"""
-                MATCH (n)-[r]-(m) 
-                WHERE toLower(n.name) CONTAINS "{search_term}" 
-                RETURN n.name AS entity, n.source AS source, labels(n) AS entity_type,
-                       type(r) AS relationship, 
-                       m.name AS connected_entity, m.source AS connected_source, labels(m) AS connected_type
-                LIMIT 25
-                """
-            return None
-
-        except Exception as e:
-            logger.error(f"Error generating fallback query: {str(e)}")
-            return None
-
     def explain_results(self, natural_query: str, cypher_query: str,
-                       results: List[Dict], sources: List[str] = None) -> str:
+                       results: List[Dict]) -> str:
         """
         Generate a natural language explanation of query results
 
@@ -262,7 +165,6 @@ For example:
             natural_query: Original natural language query
             cypher_query: Generated Cypher query
             results: Query results
-            sources: List of source documents
 
         Returns:
             Natural language explanation
@@ -271,19 +173,9 @@ For example:
             return "Query agent not initialized"
 
         try:
-            source_info = ""
-            if sources:
-                source_info = f"\n\nSource documents this information came from: {', '.join(sources)}"
-
             prompt = ChatPromptTemplate.from_messages([
                 SystemMessage(content="""You are explaining query results from a knowledge graph. 
-Provide a clear, concise explanation of what was found. Be specific and mention entity names.
-If relationships were found, describe the connections between entities.
-If no results were found, say so clearly and suggest alternative search terms.
-
-IMPORTANT: Always mention which source document(s) the information came from at the end of your explanation.
-Format it as: "📄 Source: [document name]" 
-If multiple sources, list them all."""),
+Provide a clear, concise explanation of what was found. Be specific and mention entity names."""),
                 HumanMessage(content=f"""
 Original question: {natural_query}
 
@@ -291,10 +183,9 @@ Query executed: {cypher_query}
 
 Results found: {len(results)}
 
-Sample results: {str(results[:5]) if results else "No results"}
-{source_info}
+Sample results: {str(results[:3]) if results else "No results"}
 
-Provide a brief, natural explanation of these results. Always mention the source document(s).""")
+Provide a brief, natural explanation of these results.""")
             ])
 
             response = self.llm.invoke(prompt.format_messages())
@@ -355,19 +246,15 @@ Provide a brief, natural explanation of these results. Always mention the source
             Natural language summary
         """
         try:
-            source = entity_data.get('source', 'Unknown')
-
             prompt = ChatPromptTemplate.from_messages([
                 SystemMessage(content="""You are summarizing information about an entity from a knowledge graph.
-Provide a clear, informative summary mentioning the entity's properties and key relationships.
-Always mention the source document at the end of your summary."""),
+Provide a clear, informative summary mentioning the entity's properties and key relationships."""),
                 HumanMessage(content=f"""
 Entity: {entity_name}
 Properties: {entity_data}
 Relationships: {relationships}
-Source document: {source}
 
-Provide a brief summary of this entity and its connections. Mention the source document.""")
+Provide a brief summary of this entity and its connections.""")
             ])
 
             response = self.llm.invoke(prompt.format_messages())

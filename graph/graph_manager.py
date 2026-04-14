@@ -375,14 +375,14 @@ class GraphManager:
                                 'type': list(record['m'].labels)[0] if record['m'].labels else 'Unknown',
                                 'properties': dict(record['m'])
                             }
-                        
+
                         edges.append({
                             'source': node_id,
                             'target': target_id,
                             'type': record['r'].type,
                             'properties': dict(record['r'])
                         })
-                
+
                 return {
                     "nodes": list(nodes.values()),
                     "edges": edges
@@ -390,3 +390,4 @@ class GraphManager:
         except Exception as e:
             logger.error(f"Error getting graph data: {str(e)}")
             return {"nodes": [], "edges": []}
+

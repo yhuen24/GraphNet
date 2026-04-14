@@ -1,5 +1,5 @@
 /* ==========================================================================
-   GraphNet — UI Stylesheet
+   GraphNet — UI Stylesheet  (v2 — sticky layout)
    ========================================================================== */
 
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
@@ -21,14 +21,12 @@
     --mono:       'DM Mono', monospace;
     --max-w:      780px;
 
-    /* The only two measurements that matter for layout.
-       Change these and everything else adjusts automatically. */
     --topbar-h:   52px;
-    --inputbar-h: 68px;
+    --inputbar-h: 80px;
 }
 
 /* ==========================================================================
-   Base — minimal reset, leave Streamlit's DOM alone
+   Base
    ========================================================================== */
 html, body, [class*="css"] {
     font-family: var(--font) !important;
@@ -36,24 +34,41 @@ html, body, [class*="css"] {
     color: var(--text) !important;
 }
 
-/* Strip padding Streamlit adds around the main content block */
 .block-container {
     padding-top: 0 !important;
     padding-bottom: 0 !important;
     padding-left: 0 !important;
     padding-right: 0 !important;
     max-width: 100% !important;
+    min-height: 100% !important;
 }
-
-/* Remove the default top gap Streamlit puts above the first widget */
 .stMainBlockContainer {
     padding-top: 0 !important;
+    padding-bottom: 0 !important;
 }
 
 /* Hide Streamlit chrome */
 #MainMenu, footer, header          { display: none !important; }
 .stDeployButton                    { display: none !important; }
 [data-testid="collapsedControl"]   { display: none !important; }
+
+/* ==========================================================================
+   LAYOUT — main section is the scroll viewport
+   ========================================================================== */
+[data-testid="stAppViewContainer"] > section.main {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    height: 100vh !important;
+}
+
+[data-testid="stMainBlockContainer"] {
+    overflow: visible !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    /* Ensures container fills the scroll viewport so sticky bottom works
+       even when message content is shorter than the screen */
+    min-height: 100% !important;
+}
 
 /* ==========================================================================
    Sidebar
@@ -96,30 +111,20 @@ html, body, [class*="css"] {
     margin: 0.8rem 0 0.3rem;
 }
 
-
-
-/* --- Top bar ------------------------------------------------------------ */
+/* ==========================================================================
+   Top bar — STICKY (immune to Streamlit's CSS transforms)
+   ========================================================================== */
 .chat-top-bar {
-    position: fixed;
+    position: sticky;
     top: 0;
-    /* sidebar width is set by Streamlit as a CSS var we can read,
-       but as a safe fallback we use the sidebar's actual rendered width
-       by anchoring to the main section's left edge instead */
-    left: 0;
-    right: 0;
     z-index: 999;
     height: var(--topbar-h);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 2rem 0 2rem;
+    padding: 0 2rem;
     border-bottom: 1px solid var(--border);
     background: var(--bg);
-    /* Push it right so it sits next to the sidebar.
-       Streamlit renders the sidebar at ~21% on most screens,
-       but we use the sidebar element's own width via a sibling selector hack.
-       The reliable cross-screen approach: match sidebar's right edge. */
-    margin-left: auto;
 }
 .chat-top-bar h2 {
     font-size: 0.95rem;
@@ -128,30 +133,17 @@ html, body, [class*="css"] {
     margin: 0;
 }
 
-/* --- Scrollable messages area ------------------------------------------ */
-.messages-scroll {
-    position: fixed;
-    top: var(--topbar-h);
-    left: 0;
-    right: 0;
-    bottom: var(--inputbar-h);
-    overflow-y: scroll !important; /* scroll not auto — always shows track */
-    overflow-x: hidden;
-    padding: 1.5rem 0 1rem;
-    scroll-behavior: smooth;
-}
-
-/* --- Input bar ---------------------------------------------------------- */
+/* ==========================================================================
+   Input bar — STICKY at bottom
+   ========================================================================== */
 .input-bar {
-    position: fixed;
+    position: sticky;
     bottom: 0;
-    left: 0;
-    right: 0;
     z-index: 999;
-    height: var(--inputbar-h);
+    min-height: var(--inputbar-h);
     display: flex;
     align-items: center;
-    padding: 0 2rem;
+    padding: 0.6rem 2rem;
     background: var(--bg);
     border-top: 1px solid var(--border);
 }
@@ -162,23 +154,6 @@ html, body, [class*="css"] {
     display: flex;
     gap: 8px;
     align-items: center;
-}
-
-/* Push fixed elements past the sidebar.
-   Streamlit's sidebar is a separate stacking context so we use
-   the [data-testid="stSidebar"] actual width via CSS env if available,
-   otherwise we rely on the default Streamlit sidebar CSS variable. */
-[data-testid="stSidebar"] ~ .main .chat-top-bar,
-[data-testid="stSidebar"] ~ .main .messages-scroll,
-[data-testid="stSidebar"] ~ .main .input-bar {
-    left: var(--sidebar-width, 0px);
-}
-
-/* Streamlit sets this variable natively on the root when sidebar is open */
-.chat-top-bar,
-.messages-scroll,
-.input-bar {
-    left: var(--sidebar-size, 0px);
 }
 
 /* ==========================================================================
@@ -260,7 +235,7 @@ html, body, [class*="css"] {
 .pill-Other        { background:#6b6b7822; color:#9b9baa; border:1px solid #6b6b7840; }
 
 /* ==========================================================================
-   Welcome screen
+   Welcome screen — fill the space between top bar and input bar
    ========================================================================== */
 .welcome {
     display: flex;
@@ -270,6 +245,7 @@ html, body, [class*="css"] {
     gap: 1.4rem;
     padding: 4rem 2rem 2rem;
     text-align: center;
+    min-height: calc(100vh - var(--topbar-h) - var(--inputbar-h) - 2rem);
 }
 .welcome-icon {
     font-size: 3.5rem;
@@ -290,10 +266,8 @@ html, body, [class*="css"] {
     border-radius: var(--radius);
     padding: 0.5rem;
     margin-top: 0.5rem;
-    /* Let the iframe inside define its own height — don't clip it */
     overflow: visible;
 }
-/* Make the pyvis iframe fill its container and be scrollable */
 .graph-panel iframe {
     border: none !important;
     border-radius: calc(var(--radius) - 2px);
@@ -343,7 +317,7 @@ html, body, [class*="css"] {
 }
 .stButton > button:hover { opacity: 0.9 !important; transform: translateY(-1px) !important; }
 
-/* Send button — matches taller input */
+/* Send button */
 .input-bar .stButton > button {
     padding: 0 !important;
     width: 54px !important;
@@ -401,27 +375,15 @@ html, body, [class*="css"] {
 hr { border-color: var(--border) !important; }
 
 /* ==========================================================================
-   Thinking animation
-   ========================================================================== */
-.thinking { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 0.8rem; padding: 0.6rem 2rem; max-width: var(--max-w); margin: 0 auto; }
-.dot-pulse span { display: inline-block; width: 6px; height: 6px; background: var(--muted); border-radius: 50%; margin: 0 2px; animation: pulse 1.2s infinite ease-in-out; }
-.dot-pulse span:nth-child(2) { animation-delay: 0.2s; }
-.dot-pulse span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes pulse { 0%,80%,100%{transform:scale(0.6);opacity:0.4} 40%{transform:scale(1);opacity:1} }
-
-
-/* ==========================================================================
-   Chat / Graph toggle buttons (per AI message)
+   Chat / Graph toggle buttons
    ========================================================================== */
 .toggle-row {
     display: flex;
     gap: 6px;
-    /* align with bubble: main padding + avatar width + gap */
     padding-left: calc(2rem + 32px + 14px);
     margin: 0.5rem 0 0.2rem;
 }
 
-/* Override Streamlit secondary button to look like a tab */
 [data-testid="stHorizontalBlock"] .stButton > button[kind="secondary"] {
     background: var(--surface2) !important;
     color: var(--muted) !important;
@@ -444,23 +406,6 @@ hr { border-color: var(--border) !important; }
     border-radius: 20px !important;
     box-shadow: none !important;
     transform: none !important;
-}
-
-
-/* Kill Streamlit's own page scrollbar — only hide on outer wrappers */
-[data-testid="stAppViewContainer"] > section.main {
-    overflow: hidden !important;
-}
-
-section.main > div:first-child,
-[data-testid="stMainBlockContainer"] {
-    overflow: visible !important;
-}
-
-/* stMainBlockContainer must NOT have overflow:hidden — it wraps .messages-scroll
-   and would clip its scrollbar. Use overflow:visible instead. */
-[data-testid="stMainBlockContainer"] {
-    overflow: visible !important;
 }
 
 /* ==========================================================================
@@ -511,9 +456,11 @@ section.main > div:first-child,
 ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text); }
 
-/* Force the messages area scrollbar to always show so users know it's scrollable */
-.messages-scroll::-webkit-scrollbar { width: 6px; }
-.messages-scroll::-webkit-scrollbar-track { background: var(--surface2); border-radius: 4px; }
-.messages-scroll::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 4px; }
-.messages-scroll::-webkit-scrollbar-thumb:hover { background: var(--text); }
-.messages-scroll { scrollbar-width: thin; scrollbar-color: var(--muted) var(--surface2); }
+[data-testid="stAppViewContainer"] > section.main::-webkit-scrollbar { width: 6px; }
+[data-testid="stAppViewContainer"] > section.main::-webkit-scrollbar-track { background: var(--surface2); border-radius: 4px; }
+[data-testid="stAppViewContainer"] > section.main::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 4px; }
+[data-testid="stAppViewContainer"] > section.main::-webkit-scrollbar-thumb:hover { background: var(--text); }
+[data-testid="stAppViewContainer"] > section.main {
+    scrollbar-width: thin;
+    scrollbar-color: var(--muted) var(--surface2);
+}

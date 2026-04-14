@@ -180,6 +180,18 @@ def delete_session_by_id(sid: str) -> None:
         st.session_state.show_graph_for = None
 
 
+# ── Helper: safely get a string from a value that might be str, dict, or list ─
+def _safe_str(val):
+    """Return a display string from a result value (str, dict, or list)."""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, dict):
+        return val.get("name", "")
+    if isinstance(val, list) and val:
+        return str(val[0])
+    return ""
+
+
 def send_query(query_text):
     """Run the query against GraphNet and append messages."""
     if not query_text.strip():
@@ -208,18 +220,97 @@ def send_query(query_text):
         if result.get("success"):
             explanation = result.get("explanation") or "Query executed successfully."
             raw = result.get("results", [])
-            # Try to extract entity names from raw results for pills
+
+            # ── Extract entities from query result rows ───────────────
+            #
+            # Cypher results come back as flat dicts like:
+            #   {"entity": "Dangote", "entity_type": ["Organization"],
+            #    "relationship": "OWNS", "connected_entity": "Cement Co", ...}
+            #
+            # OR as Neo4j node objects (dicts with a "name" key).
+            # We handle both formats.
+
             entities = []
-            for row in raw[:20]:
-                for v in row.values():
+            seen_names = set()
+
+            # Keys that typically hold entity names
+            NAME_KEYS = {
+                "entity", "name", "connected_entity",
+                "n.name", "m.name",
+            }
+            # Keys that hold the corresponding type / labels
+            TYPE_KEYS = {
+                "entity_type", "connected_type", "type", "labels",
+            }
+
+            for row in raw[:30]:
+                # Collect all type/label values in this row for lookup
+                row_types = {}
+                for k, v in row.items():
+                    if k in TYPE_KEYS or k.endswith("_type") or k == "labels":
+                        row_types[k] = v
+
+                # --- string-valued name fields ---
+                for k, v in row.items():
+                    if k not in NAME_KEYS:
+                        continue
+                    name = _safe_str(v)
+                    if not name or name in seen_names:
+                        continue
+                    seen_names.add(name)
+
+                    # Resolve entity type
+                    etype = "Other"
+                    # Try partner key first (entity→entity_type, connected_entity→connected_type)
+                    partner = k.replace("entity", "type").replace("name", "type")
+                    raw_type = (row_types.get(partner)
+                                or row_types.get("entity_type")
+                                or row_types.get("labels")
+                                or row_types.get("type"))
+                    if raw_type:
+                        if isinstance(raw_type, list) and raw_type:
+                            etype = str(raw_type[0])
+                        elif isinstance(raw_type, str):
+                            etype = raw_type
+
+                    entities.append({"name": name, "type": etype})
+
+                # --- dict-valued results (Neo4j node objects) ---
+                for k, v in row.items():
                     if isinstance(v, dict) and "name" in v:
-                        entities.append({
-                            "name": v["name"],
-                            "type": (v.get("type") or
-                                     next(iter(v.get("labels", ["Other"])), "Other")),
-                        })
-            entities = list({e["name"]: e for e in entities}.values())
-            relationships = result.get("results", [])
+                        name = v["name"]
+                        if name in seen_names:
+                            continue
+                        seen_names.add(name)
+                        etype = (v.get("type")
+                                 or next(iter(v.get("labels", ["Other"])), "Other"))
+                        entities.append({"name": name, "type": etype})
+
+            # ── Extract relationships ─────────────────────────────────
+            relationships = []
+            for row in raw[:30]:
+                src = _safe_str(
+                    row.get("entity")
+                    or row.get("name")
+                    or row.get("n", "")
+                )
+                tgt = _safe_str(
+                    row.get("connected_entity")
+                    or row.get("m", "")
+                )
+                rel = _safe_str(
+                    row.get("relationship")
+                    or row.get("rel_type")
+                    or row.get("type", "")
+                ) or "RELATED"
+
+                if src and tgt:
+                    relationships.append({
+                        "source": src,
+                        "target": tgt,
+                        "type": rel,
+                    })
+
             reply = explanation
         else:
             reply = f"❌ {result.get('error', 'Query failed.')}"
@@ -307,7 +398,13 @@ def render_graph(msg):
         net.set_options("""{
           "physics":{"enabled":true,"stabilization":{"iterations":120}},
           "interaction":{"hover":true,"navigationButtons":true,"zoomView":true},
-          "edges":{"color":{"color":"#aaaaaa","highlight":"#ffffff","hover":"#ffffff"},"width":1.5,"smooth":{"type":"dynamic"}}
+          "edges":{
+            "color":{"color":"#5eead4","highlight":"#99f6e4","hover":"#99f6e4","inherit":false},
+            "width":2,
+            "arrows":{"to":{"enabled":true,"scaleFactor":1.0}},
+            "font":{"color":"#e8e8ec","size":11,"strokeWidth":0},
+            "smooth":{"type":"continuous"}
+          }
         }""")
 
         COLORS = {
@@ -316,6 +413,8 @@ def render_graph(msg):
             "Product": "#4ade80", "Technology": "#60a5fa",
         }
         added = set()
+
+        # Add entity nodes
         for e in entities:
             nid = e["name"]
             if nid not in added:
@@ -324,20 +423,24 @@ def render_graph(msg):
                              title=f"{e.get('type','?')}: {nid}")
                 added.add(nid)
 
+        # Add relationship edges
+        # Keys are now normalised by send_query to: source, target, type
         for r in rels[:30]:
-            s = r.get("source") or r.get("e1", {})
-            t = r.get("target") or r.get("e2", {})
-            rel_type = r.get("relationship") or r.get("type", "RELATED")
-            if isinstance(s, dict): s = s.get("name", "")
-            if isinstance(t, dict): t = t.get("name", "")
-            if s and t:
-                for nid in [s, t]:
-                    if nid not in added:
-                        net.add_node(nid, label=nid, color="#9b9baa", size=18)
-                        added.add(nid)
-                net.add_edge(s, t, label=str(rel_type),
-                             color={"color": "#cccccc", "highlight": "#ffffff", "hover": "#ffffff"},
-                             width=1.5, arrows="to")
+            s = r.get("source", "")
+            t = r.get("target", "")
+            rel_type = r.get("type", "RELATED")
+
+            if not s or not t:
+                continue
+
+            # Ensure both endpoints exist as nodes
+            for nid in [s, t]:
+                if nid not in added:
+                    net.add_node(nid, label=nid, color="#9b9baa", size=18)
+                    added.add(nid)
+
+            net.add_edge(s, t, label=str(rel_type),
+                         width=2, arrows="to")
 
         html_str = net.generate_html()
         # scrolling=True lets the user scroll within the graph iframe
