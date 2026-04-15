@@ -221,14 +221,7 @@ def send_query(query_text):
             explanation = result.get("explanation") or "Query executed successfully."
             raw = result.get("results", [])
 
-            # ── Extract entities from query result rows ───────────────
-            #
-            # Cypher results come back as flat dicts like:
-            #   {"entity": "Dangote", "entity_type": ["Organization"],
-            #    "relationship": "OWNS", "connected_entity": "Cement Co", ...}
-            #
-            # OR as Neo4j node objects (dicts with a "name" key).
-            # We handle both formats.
+
 
             entities = []
             seen_names = set()
@@ -392,6 +385,7 @@ def render_graph(msg):
 
     # Build a mini vis with pyvis directly
     try:
+        import json as _json
         from pyvis.network import Network
         net = Network(height="600px", width="100%", bgcolor="#17171a",
                       font_color="#e8e8ec", directed=True)
@@ -414,17 +408,45 @@ def render_graph(msg):
         }
         added = set()
 
+        # Build node metadata for the click panel
+        # Fetch descriptions and sources from the graph for each entity
+        node_meta = {}
+
+        def _humanize_rel(rel_type):
+            """WORKS_FOR → 'works for', LOCATED_IN → 'located in'"""
+            return rel_type.replace("_", " ").lower()
+
+        def _fetch_entity_info(name):
+            """Pull description + source from the graph manager."""
+            info = {"description": "", "source": ""}
+            try:
+                entity_data = gn.graph_manager.get_entity(name)
+                if entity_data:
+                    info["description"] = entity_data.get("description", "")
+                    info["source"] = entity_data.get("source", "")
+            except Exception:
+                pass
+            return info
+
         # Add entity nodes
         for e in entities:
             nid = e["name"]
             if nid not in added:
-                color = COLORS.get(e.get("type", "Other"), "#9b9baa")
+                etype = e.get("type", "Other")
+                color = COLORS.get(etype, "#9b9baa")
                 net.add_node(nid, label=nid, color=color, size=22,
-                             title=f"{e.get('type','?')}: {nid}")
+                             title=f"{etype}: {nid}")
                 added.add(nid)
+                info = _fetch_entity_info(nid)
+                node_meta[nid] = {
+                    "type": etype,
+                    "color": color,
+                    "description": info["description"],
+                    "source": info["source"],
+                    "connections": [],
+                }
 
-        # Add relationship edges
-        # Keys are now normalised by send_query to: source, target, type
+        # Add relationship edges + collect connection metadata
         for r in rels[:30]:
             s = r.get("source", "")
             t = r.get("target", "")
@@ -433,17 +455,218 @@ def render_graph(msg):
             if not s or not t:
                 continue
 
-            # Ensure both endpoints exist as nodes
             for nid in [s, t]:
                 if nid not in added:
                     net.add_node(nid, label=nid, color="#9b9baa", size=18)
                     added.add(nid)
+                    info = _fetch_entity_info(nid)
+                    node_meta[nid] = {
+                        "type": "Unknown",
+                        "color": "#9b9baa",
+                        "description": info["description"],
+                        "source": info["source"],
+                        "connections": [],
+                    }
 
             net.add_edge(s, t, label=str(rel_type),
                          width=2, arrows="to")
 
+            # Build readable sentences for connections
+            readable = _humanize_rel(rel_type)
+            if s in node_meta:
+                node_meta[s]["connections"].append({
+                    "sentence": f"{readable} {t}",
+                })
+            if t in node_meta:
+                node_meta[t]["connections"].append({
+                    "sentence": f"{s} {readable} this entity",
+                })
+
         html_str = net.generate_html()
-        # scrolling=True lets the user scroll within the graph iframe
+
+        # ── Inject click handler + info panel ────────────────────────
+        meta_json = _json.dumps(node_meta, ensure_ascii=False)
+
+        injection = """
+<style>
+#nodeInfoPanel {
+  display: none;
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 300px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  background: #1e1e23;
+  border: 1px solid #2a2a30;
+  border-radius: 12px;
+  padding: 18px;
+  font-family: 'DM Sans', -apple-system, sans-serif;
+  color: #e8e8ec;
+  z-index: 1000;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+#nodeInfoPanel .panel-close {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  cursor: pointer;
+  color: #6b6b78;
+  font-size: 18px;
+  line-height: 1;
+  border: none;
+  background: none;
+}
+#nodeInfoPanel .panel-close:hover { color: #e8e8ec; }
+#nodeInfoPanel .node-name {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+  padding-right: 24px;
+  line-height: 1.3;
+}
+#nodeInfoPanel .node-type {
+  display: inline-block;
+  font-size: 0.7rem;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-weight: 500;
+  margin-bottom: 14px;
+}
+#nodeInfoPanel .node-desc {
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: #c8c8d0;
+  margin-bottom: 14px;
+}
+#nodeInfoPanel .section-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b6b78;
+  margin: 14px 0 8px;
+}
+#nodeInfoPanel .conn-sentence {
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: #c8c8d0;
+  padding: 3px 0;
+}
+#nodeInfoPanel .conn-sentence .conn-highlight {
+  color: #5eead4;
+  font-weight: 500;
+}
+#nodeInfoPanel .no-info {
+  color: #6b6b78;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+#nodeInfoPanel .source-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #2a2a30;
+  font-size: 0.75rem;
+  color: #6b6b78;
+}
+#nodeInfoPanel .source-tag .source-icon { font-size: 0.85rem; }
+#nodeInfoPanel .source-tag .source-name { color: #a8a8b4; }
+#nodeInfoPanel .click-hint {
+  color: #4a4a56;
+  font-size: 0.68rem;
+  text-align: center;
+  margin-top: 10px;
+}
+</style>
+
+<div id="nodeInfoPanel"></div>
+
+<script>
+(function() {
+  var meta = """ + meta_json + """;
+
+  var pillColors = {
+    "Person":       {bg:"#7c6af722", fg:"#a89cf9", bd:"#7c6af740"},
+    "Organization": {bg:"#5eead422", fg:"#7df3e4", bd:"#5eead440"},
+    "Location":     {bg:"#f59e0b22", fg:"#fbbf24", bd:"#f59e0b40"},
+    "Concept":      {bg:"#ec489922", fg:"#f472b6", bd:"#ec489940"},
+    "Product":      {bg:"#22c55e22", fg:"#4ade80", bd:"#22c55e40"},
+    "Technology":   {bg:"#3b82f622", fg:"#60a5fa", bd:"#3b82f640"},
+  };
+  var defaultPill = {bg:"#6b6b7822", fg:"#9b9baa", bd:"#6b6b7840"};
+
+  var panel = document.getElementById("nodeInfoPanel");
+
+  function escHtml(s) {
+    var d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function showPanel(nodeId) {
+    var info = meta[nodeId];
+    if (!info) return;
+
+    var p = pillColors[info.type] || defaultPill;
+    var pillStyle = "background:"+p.bg+";color:"+p.fg+";border:1px solid "+p.bd+";";
+
+    var html = '<button class="panel-close" onclick="document.getElementById(\\'nodeInfoPanel\\').style.display=\\'none\\'">&times;</button>';
+    html += '<div class="node-name">' + escHtml(nodeId) + '</div>';
+    html += '<span class="node-type" style="' + pillStyle + '">' + escHtml(info.type) + '</span>';
+
+    // Description
+    if (info.description) {
+      html += '<div class="node-desc">' + escHtml(info.description) + '</div>';
+    }
+
+    // Connections as readable sentences
+    var conns = info.connections || [];
+    if (conns.length > 0) {
+      html += '<div class="section-label">Relationships</div>';
+      for (var i = 0; i < conns.length; i++) {
+        html += '<div class="conn-sentence">' + escHtml(conns[i].sentence) + '</div>';
+      }
+    }
+
+    // Source attribution
+    if (info.source) {
+      var sources = info.source.split(",");
+      for (var i = 0; i < sources.length; i++) {
+        var src = sources[i].trim();
+        if (src) {
+          html += '<div class="source-tag"><span class="source-icon">📄</span><span class="source-name">' + escHtml(src) + '</span></div>';
+        }
+      }
+    }
+
+    html += '<div class="click-hint">Click empty space to close</div>';
+
+    panel.innerHTML = html;
+    panel.style.display = "block";
+  }
+
+  var checkInterval = setInterval(function() {
+    if (typeof network !== "undefined" && network) {
+      clearInterval(checkInterval);
+      network.on("click", function(params) {
+        if (params.nodes && params.nodes.length > 0) {
+          showPanel(params.nodes[0]);
+        } else {
+          panel.style.display = "none";
+        }
+      });
+    }
+  }, 200);
+})();
+</script>
+"""
+
+        # Inject before closing </body>
+        html_str = html_str.replace("</body>", injection + "</body>")
+
         components.html(html_str, height=620, scrolling=True)
 
     except Exception as e:

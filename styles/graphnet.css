@@ -1,5 +1,5 @@
 /* ==========================================================================
-   GraphNet — UI Stylesheet  (v2 — sticky layout)
+   GraphNet — UI Stylesheet (v4 — hybrid scroll + sticky input)
    ========================================================================== */
 
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
@@ -25,9 +25,9 @@
     --inputbar-h: 80px;
 }
 
-/* ==========================================================================
-   Base
-   ========================================================================== */
+/* ========================================================================== */
+/* Base */
+/* ========================================================================== */
 html, body, [class*="css"] {
     font-family: var(--font) !important;
     background-color: var(--bg) !important;
@@ -35,118 +35,72 @@ html, body, [class*="css"] {
 }
 
 .block-container {
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    padding-left: 0 !important;
-    padding-right: 0 !important;
+    padding: 0 !important;
     max-width: 100% !important;
-    min-height: 100% !important;
-}
-.stMainBlockContainer {
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
 }
 
 /* Hide Streamlit chrome */
-#MainMenu, footer, header          { display: none !important; }
-.stDeployButton                    { display: none !important; }
-[data-testid="collapsedControl"]   { display: none !important; }
+#MainMenu, footer, header { display: none !important; }
 
-/* ==========================================================================
-   LAYOUT — main section is the scroll viewport
-   ========================================================================== */
+/* ========================================================================== */
+/* Layout (IMPORTANT FIX) */
+/* ========================================================================== */
+
+/* Allow normal scrolling */
 [data-testid="stAppViewContainer"] > section.main {
     overflow-y: auto !important;
-    overflow-x: hidden !important;
     height: 100vh !important;
 }
 
+/* REMOVE problematic stretching */
 [data-testid="stMainBlockContainer"] {
-    overflow: visible !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    /* Ensures container fills the scroll viewport so sticky bottom works
-       even when message content is shorter than the screen */
-    min-height: 100% !important;
+    min-height: auto !important;
 }
 
-/* ==========================================================================
-   Sidebar
-   ========================================================================== */
-[data-testid="stSidebar"] {
-    background: var(--surface) !important;
-    border-right: 1px solid var(--border) !important;
-}
-[data-testid="stSidebar"] > div:first-child {
-    padding-top: 1.2rem !important;
-}
-
-.sidebar-brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 1.2rem 1.2rem;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 1rem;
-}
-.sidebar-brand span.icon {
-    font-size: 1.4rem;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-.sidebar-brand span.name {
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: var(--text);
-}
-
-.sidebar-section-label {
-    font-size: 0.68rem;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--muted);
-    padding: 0 1.2rem;
-    margin: 0.8rem 0 0.3rem;
-}
-
-/* ==========================================================================
-   Top bar — STICKY (immune to Streamlit's CSS transforms)
-   ========================================================================== */
+/* ========================================================================== */
+/* Top bar (sticky) */
+/* ========================================================================== */
 .chat-top-bar {
     position: sticky;
     top: 0;
     z-index: 999;
+
     height: var(--topbar-h);
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0 2rem;
-    border-bottom: 1px solid var(--border);
+
     background: var(--bg);
-}
-.chat-top-bar h2 {
-    font-size: 0.95rem;
-    font-weight: 500;
-    color: var(--text);
-    margin: 0;
+    border-bottom: 1px solid var(--border);
 }
 
-/* ==========================================================================
-   Input bar — STICKY at bottom
-   ========================================================================== */
+/* ========================================================================== */
+/* Messages container (natural flow + scrollable page) */
+/* ========================================================================== */
+.messages-scroll {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: var(--inputbar-h);
+}
+
+/* ========================================================================== */
+/* Input bar (sticky bottom — key fix) */
+/* ========================================================================== */
 .input-bar {
     position: sticky;
     bottom: 0;
     z-index: 999;
+
     min-height: var(--inputbar-h);
     display: flex;
     align-items: center;
     padding: 0.6rem 2rem;
+
     background: var(--bg);
     border-top: 1px solid var(--border);
 }
+
 .input-bar-inner {
     width: 100%;
     max-width: var(--max-w);
@@ -156,22 +110,17 @@ html, body, [class*="css"] {
     align-items: center;
 }
 
-/* ==========================================================================
-   Status dot
-   ========================================================================== */
-.status-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #22c55e;
-    display: inline-block;
-    margin-right: 6px;
-    box-shadow: 0 0 6px #22c55e88;
+/* ========================================================================== */
+/* Sidebar */
+/* ========================================================================== */
+[data-testid="stSidebar"] {
+    background: var(--surface) !important;
+    border-right: 1px solid var(--border) !important;
 }
-.status-offline { background: #ef4444; box-shadow: 0 0 6px #ef444488; }
 
-/* ==========================================================================
-   Message rows
-   ========================================================================== */
+/* ========================================================================== */
+/* Messages */
+/* ========================================================================== */
 .message-row {
     display: flex;
     gap: 14px;
@@ -179,24 +128,26 @@ html, body, [class*="css"] {
     max-width: var(--max-w);
     margin: 0 auto;
     width: 100%;
-    box-sizing: border-box;
 }
+
 .message-row.user { flex-direction: row-reverse; }
 
 .avatar {
-    width: 32px; height: 32px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
-    flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 0.75rem; font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
+
 .avatar.ai {
     background: linear-gradient(135deg, var(--accent), var(--accent2));
     color: #fff;
 }
+
 .avatar.user {
     background: var(--surface2);
-    color: var(--muted);
     border: 1px solid var(--border);
 }
 
@@ -205,262 +156,50 @@ html, body, [class*="css"] {
     padding: 0.75rem 1rem;
     border-radius: var(--radius);
     font-size: 0.88rem;
-    line-height: 1.65;
+    line-height: 1.6;
 }
-.bubble.ai  { background: var(--ai-bg);  border: 1px solid var(--border); color: var(--text); }
-.bubble.user { background: var(--user-bg); border: 1px solid #2e2e40;      color: var(--text); text-align: right; }
 
-.bubble-meta {
-    font-size: 0.7rem;
-    color: var(--muted);
-    margin-top: 6px;
-    display: flex; gap: 8px; align-items: center;
-}
-.message-row.user .bubble-meta { justify-content: flex-end; }
-
-/* ==========================================================================
-   Entity pills
-   ========================================================================== */
-.entity-pills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
-.entity-pill {
-    font-size: 0.68rem; padding: 2px 8px;
-    border-radius: 20px; font-family: var(--mono); font-weight: 500;
-}
-.pill-Person       { background:#7c6af722; color:#a89cf9; border:1px solid #7c6af740; }
-.pill-Organization { background:#5eead422; color:#7df3e4; border:1px solid #5eead440; }
-.pill-Location     { background:#f59e0b22; color:#fbbf24; border:1px solid #f59e0b40; }
-.pill-Concept      { background:#ec489922; color:#f472b6; border:1px solid #ec489940; }
-.pill-Product      { background:#22c55e22; color:#4ade80; border:1px solid #22c55e40; }
-.pill-Technology   { background:#3b82f622; color:#60a5fa; border:1px solid #3b82f640; }
-.pill-Other        { background:#6b6b7822; color:#9b9baa; border:1px solid #6b6b7840; }
-
-/* ==========================================================================
-   Welcome screen — fill the space between top bar and input bar
-   ========================================================================== */
-.welcome {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 1.4rem;
-    padding: 4rem 2rem 2rem;
-    text-align: center;
-    min-height: calc(100vh - var(--topbar-h) - var(--inputbar-h) - 2rem);
-}
-.welcome-icon {
-    font-size: 3.5rem;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    line-height: 1;
-}
-.welcome h1 { font-size: 1.6rem; font-weight: 600; color: var(--text); margin: 0; }
-.welcome p  { color: var(--muted); font-size: 0.88rem; max-width: 420px; line-height: 1.6; margin: 0; }
-
-/* ==========================================================================
-   Graph panel
-   ========================================================================== */
-.graph-panel {
-    background: var(--surface);
+.bubble.ai {
+    background: var(--ai-bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.5rem;
-    margin-top: 0.5rem;
-    overflow: visible;
-}
-.graph-panel iframe {
-    border: none !important;
-    border-radius: calc(var(--radius) - 2px);
-    display: block;
-    width: 100% !important;
 }
 
-/* ==========================================================================
-   Streamlit widget overrides
-   ========================================================================== */
+.bubble.user {
+    background: var(--user-bg);
+}
 
-/* Text input */
-.stTextInput { flex: 1; margin-bottom: 0 !important; }
-.stTextInput > div { margin-bottom: 0 !important; }
-.stTextInput > div > div > input {
+/* ========================================================================== */
+/* Welcome */
+/* ========================================================================== */
+.welcome {
+    margin: auto;
+    text-align: center;
+}
+
+/* ========================================================================== */
+/* Inputs */
+/* ========================================================================== */
+.stTextInput input {
     background: var(--surface) !important;
     border: 1px solid var(--border) !important;
     border-radius: 14px !important;
-    color: var(--text) !important;
-    font-family: var(--font) !important;
-    font-size: 0.9rem !important;
-    padding: 1rem 1.2rem !important;
-    box-shadow: none !important;
-    transition: border-color 0.15s !important;
+    padding: 1rem !important;
     height: 54px !important;
 }
-.stTextInput > div > div > input:focus {
-    border-color: var(--accent) !important;
-    box-shadow: 0 0 0 3px #7c6af720 !important;
-    outline: none !important;
-}
-.stTextInput > div > div > input::placeholder { color: var(--muted) !important; }
 
-/* Buttons — default */
-.stButton > button {
-    background: linear-gradient(135deg, var(--accent), #6457e8) !important;
-    color: #fff !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-family: var(--font) !important;
-    font-size: 0.83rem !important;
-    font-weight: 500 !important;
-    padding: 0.55rem 1.1rem !important;
-    transition: opacity 0.15s, transform 0.1s !important;
-    box-shadow: 0 2px 12px #7c6af740 !important;
-    white-space: nowrap !important;
-}
-.stButton > button:hover { opacity: 0.9 !important; transform: translateY(-1px) !important; }
-
-/* Send button */
-.input-bar .stButton > button {
-    padding: 0 !important;
-    width: 54px !important;
+.stButton button {
     height: 54px !important;
-    font-size: 1.1rem !important;
     border-radius: 14px !important;
-    flex-shrink: 0 !important;
 }
 
-/* Sidebar buttons — ghost */
-[data-testid="stSidebar"] .stButton > button {
-    background: transparent !important;
-    box-shadow: none !important;
-    color: var(--muted) !important;
-    border: none !important;
-    font-size: 0.82rem !important;
-    text-align: left !important;
-    justify-content: flex-start !important;
-    padding: 0.4rem 0.6rem !important;
-    transform: none !important;
-}
-[data-testid="stSidebar"] .stButton > button:hover {
-    background: var(--surface2) !important;
-    color: var(--text) !important;
-    transform: none !important;
-    opacity: 1 !important;
-}
-[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] > div:last-child .stButton > button {
-    opacity: 0.4; font-size: 0.7rem !important; padding: 0.3rem 0.45rem !important;
-}
-[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] > div:last-child .stButton > button:hover {
-    opacity: 1 !important; color: #ef4444 !important; background: transparent !important;
-}
 
-/* Input bar columns */
-.input-bar [data-testid="stHorizontalBlock"] {
-    gap: 8px !important; align-items: center !important;
-    flex-wrap: nowrap !important; width: 100% !important;
+/* ========================================================================== */
+/* Scrollbar */
+/* ========================================================================== */
+::-webkit-scrollbar {
+    width: 6px;
 }
-.input-bar [data-testid="stColumn"] { padding: 0 !important; min-width: 0 !important; }
-.input-bar .stButton { margin-bottom: 0 !important; flex-shrink: 0 !important; }
-
-/* File uploader */
-[data-testid="stFileUploader"] {
-    background: var(--surface2) !important;
-    border: 1px dashed var(--border) !important;
-    border-radius: var(--radius) !important;
-    padding: 0.75rem !important;
-}
-[data-testid="stFileUploader"] label { color: var(--muted) !important; font-size: 0.8rem !important; }
-
-/* Misc */
-.stProgress > div > div { background: var(--accent) !important; }
-.stAlert { border-radius: var(--radius) !important; font-size: 0.82rem !important; }
-hr { border-color: var(--border) !important; }
-
-/* ==========================================================================
-   Chat / Graph toggle buttons
-   ========================================================================== */
-.toggle-row {
-    display: flex;
-    gap: 6px;
-    padding-left: calc(2rem + 32px + 14px);
-    margin: 0.5rem 0 0.2rem;
-}
-
-[data-testid="stHorizontalBlock"] .stButton > button[kind="secondary"] {
-    background: var(--surface2) !important;
-    color: var(--muted) !important;
-    box-shadow: none !important;
-    border: 1px solid var(--border) !important;
-    font-size: 0.78rem !important;
-    padding: 0.3rem 0.75rem !important;
-    border-radius: 20px !important;
-    transform: none !important;
-}
-[data-testid="stHorizontalBlock"] .stButton > button[kind="secondary"]:hover {
-    border-color: var(--accent) !important;
-    color: var(--text) !important;
-    opacity: 1 !important;
-    transform: none !important;
-}
-[data-testid="stHorizontalBlock"] .stButton > button[kind="primary"] {
-    font-size: 0.78rem !important;
-    padding: 0.3rem 0.75rem !important;
-    border-radius: 20px !important;
-    box-shadow: none !important;
-    transform: none !important;
-}
-
-/* ==========================================================================
-   Thinking / loading indicator
-   ========================================================================== */
-.thinking-row {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 0.5rem 2rem;
-    max-width: var(--max-w);
-    margin: 0 auto;
-    width: 100%;
-    box-sizing: border-box;
-}
-
-.thinking-bubble {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    background: var(--ai-bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.75rem 1rem;
-}
-
-.thinking-bubble .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
+::-webkit-scrollbar-thumb {
     background: var(--muted);
-    display: inline-block;
-    animation: thinking-pulse 1.4s ease-in-out infinite;
-}
-.thinking-bubble .dot:nth-child(2) { animation-delay: 0.2s; }
-.thinking-bubble .dot:nth-child(3) { animation-delay: 0.4s; }
-
-@keyframes thinking-pulse {
-    0%, 60%, 100% { transform: scale(0.7); opacity: 0.4; background: var(--muted); }
-    30%            { transform: scale(1.1); opacity: 1;   background: var(--accent); }
-}
-
-/* ==========================================================================
-   Scrollbar
-   ========================================================================== */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--surface); }
-::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text); }
-
-[data-testid="stAppViewContainer"] > section.main::-webkit-scrollbar { width: 6px; }
-[data-testid="stAppViewContainer"] > section.main::-webkit-scrollbar-track { background: var(--surface2); border-radius: 4px; }
-[data-testid="stAppViewContainer"] > section.main::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 4px; }
-[data-testid="stAppViewContainer"] > section.main::-webkit-scrollbar-thumb:hover { background: var(--text); }
-[data-testid="stAppViewContainer"] > section.main {
-    scrollbar-width: thin;
-    scrollbar-color: var(--muted) var(--surface2);
+    border-radius: 4px;
 }
