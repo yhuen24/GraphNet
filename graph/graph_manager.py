@@ -208,20 +208,23 @@ class GraphManager:
                     MATCH (e:{entity_type})
                     WHERE e.canonical_name = $cname
                        OR toLower(e.name) CONTAINS $cname
-                    RETURN e LIMIT 1
+                    RETURN e, labels(e) AS _labels LIMIT 1
                     """
                 else:
                     query = """
                     MATCH (e)
                     WHERE e.canonical_name = $cname
                        OR toLower(e.name) CONTAINS $cname
-                    RETURN e LIMIT 1
+                    RETURN e, labels(e) AS _labels LIMIT 1
                     """
 
                 result = session.run(query, cname=cname)
                 record = result.single()
                 if record:
-                    return dict(record["e"])
+                    entity_dict = dict(record["e"])
+                    labels = record["_labels"] or []
+                    entity_dict["type"] = labels[0] if labels else "Unknown"
+                    return entity_dict
                 return None
         except Exception as e:
             logger.error(f"Error getting entity: {str(e)}")
@@ -377,12 +380,14 @@ class GraphManager:
             for rec in records:
                 nname = rec.get("node_name")
                 if nname and nname not in nodes_map:
+                    _node_type = (rec.get("node_labels", ["Unknown"]) or ["Unknown"])[0]
                     nodes_map[nname] = {
                         "id": rec.get("node_cname", canonical_key(nname)),
                         "label": nname,
-                        "type": (rec.get("node_labels", ["Unknown"]) or ["Unknown"])[0],
+                        "type": _node_type,
                         "properties": {
                             "name": nname,
+                            "type": _node_type,
                             "source": rec.get("node_source", ""),
                         },
                     }
@@ -530,23 +535,29 @@ class GraphManager:
                     if record["n"]:
                         node_id = record["n"].element_id
                         if node_id not in nodes:
+                            _ntype = (list(record["n"].labels)[0]
+                                      if record["n"].labels else "Unknown")
+                            _nprops = dict(record["n"])
+                            _nprops["type"] = _ntype
                             nodes[node_id] = {
                                 "id": node_id,
                                 "label": record["n"].get("name", "Unknown"),
-                                "type": (list(record["n"].labels)[0]
-                                         if record["n"].labels else "Unknown"),
-                                "properties": dict(record["n"]),
+                                "type": _ntype,
+                                "properties": _nprops,
                             }
 
                     if record["r"] and record["m"]:
                         target_id = record["m"].element_id
                         if target_id not in nodes:
+                            _mtype = (list(record["m"].labels)[0]
+                                      if record["m"].labels else "Unknown")
+                            _mprops = dict(record["m"])
+                            _mprops["type"] = _mtype
                             nodes[target_id] = {
                                 "id": target_id,
                                 "label": record["m"].get("name", "Unknown"),
-                                "type": (list(record["m"].labels)[0]
-                                         if record["m"].labels else "Unknown"),
-                                "properties": dict(record["m"]),
+                                "type": _mtype,
+                                "properties": _mprops,
                             }
 
                         edges.append({

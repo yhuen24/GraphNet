@@ -6,6 +6,7 @@ v2 — Dual-mode: generates Cypher for Neo4j, uses semantic search for embedded 
 """
 
 import logging
+from difflib import SequenceMatcher
 from typing import List, Dict, Any, Optional
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -69,64 +70,115 @@ class QueryAgent:
     # EMBEDDED MODE — semantic search + LLM explanation
     # =====================================================================
 
+    @staticmethod
+    def _name_similarity(a: str, b: str) -> float:
+        """Case-insensitive similarity ratio between two strings."""
+        return SequenceMatcher(
+            None, a.strip().lower(), b.strip().lower()
+        ).ratio()
+
     def _process_embedded_query(self, query: str) -> Dict[str, Any]:
         """
         Pipeline for embedded (NetworkX) graphs:
             1. Ask LLM to extract key search terms from the user query.
-            2. Run semantic + fuzzy search in the graph manager.
-            3. Optionally expand with neighbourhood traversal.
-            4. Ask LLM to explain results in natural language.
+            2. Run semantic + fuzzy search — filter by NAME similarity.
+            3. Expand neighbourhood ONLY around focal (name-matched) entities.
+            4. Filter ALL results so only focal entities and their direct
+               1-hop neighbours appear — no unrelated clusters.
+            5. Ask LLM to explain results in natural language.
         """
         # Step 1 — extract search intent
         search_terms = self._extract_search_terms(query)
         logger.info(f"Extracted search terms: {search_terms}")
 
-        # Step 2 — gather results from graph
+        # Step 2 — identify focal entities via semantic + fuzzy search
         all_results: List[Dict[str, Any]] = []
-        matched_node_ids: List[str] = []
+        focal_node_ids: List[str] = []     # only nodes whose NAME matches
+        focal_names: set = set()           # display names of focal entities (lowercase)
+        focal_display_names: List[str] = []  # original-case names for graph rendering
 
         for term in search_terms:
-            # Semantic search (embeddings)
-            sem_results = self.graph_manager.semantic_search(term, top_k=5)
+            # Semantic search (embeddings) — cast a wide net then filter by name
+            sem_results = self.graph_manager.semantic_search(term, top_k=10)
             for r in sem_results:
                 nid = r.get("node_id")
-                if nid and nid not in matched_node_ids:
-                    matched_node_ids.append(nid)
+                name = r.get("name", "")
+                # Only treat this as a focal entity if the NAME actually
+                # matches the search term — not just because the embeddings
+                # are vaguely similar (same doc, same type, etc.)
+                sim = self._name_similarity(term, name)
+                if sim >= 0.45 and nid and nid not in focal_node_ids:
+                    focal_node_ids.append(nid)
+                    focal_names.add(name.strip().lower())
+                    focal_display_names.append(name.strip())
+                    logger.info(
+                        f"Focal match: '{name}' (sim={sim:.2f}) for term '{term}'"
+                    )
 
-            # Also try the full query through query_graph (fuzzy + pattern)
-            qr = self.graph_manager.query_graph(term)
-            all_results.extend(qr)
+        # Step 3 — expand neighbourhood ONLY for focal entities (1-hop)
+        focal_node_id_set = set(focal_node_ids)
+        neighbour_names: set = set()  # track which names are valid 1-hop neighbours
 
-        # Full-query search too (handles "show all organizations" etc.)
-        qr_full = self.graph_manager.query_graph(query)
-        all_results.extend(qr_full)
-
-        # Step 3 — expand neighbourhood for matched nodes
-        if matched_node_ids:
+        if focal_node_ids:
             neighbourhood = self.graph_manager.get_neighbourhood(
-                matched_node_ids, depth=1
+                focal_node_ids, depth=1
             )
-            # Convert neighbourhood edges to result rows
+            # Convert neighbourhood edges to result rows, but ONLY keep
+            # edges where at least one endpoint is a focal entity.
+            # This prevents showing neighbour↔neighbour connections
+            # (e.g. Jane Wong ↔ David Rusting) that have nothing to do
+            # with the queried person.
             for edge in neighbourhood.get("edges", []):
                 src_id = edge["source"]
                 tgt_id = edge["target"]
+
+                # Skip edges between two non-focal neighbours
+                if src_id not in focal_node_id_set and tgt_id not in focal_node_id_set:
+                    continue
+
                 src_data = {}
                 tgt_data = {}
+                src_type = "Unknown"
+                tgt_type = "Unknown"
                 for n in neighbourhood["nodes"]:
                     if n["id"] == src_id:
                         src_data = n.get("properties", {})
+                        src_type = n.get("type") or src_data.get("type", "Unknown")
                     if n["id"] == tgt_id:
                         tgt_data = n.get("properties", {})
+                        tgt_type = n.get("type") or tgt_data.get("type", "Unknown")
+
+                src_name = src_data.get("name", "Unknown")
+                tgt_name = tgt_data.get("name", "Unknown")
+
+                # Track valid neighbour names (the non-focal end of the edge)
+                neighbour_names.add(src_name.strip().lower())
+                neighbour_names.add(tgt_name.strip().lower())
 
                 all_results.append({
-                    "entity": src_data.get("name", "Unknown"),
-                    "entity_type": [src_data.get("type", "Unknown")],
+                    "entity": src_name,
+                    "entity_type": [src_type],
                     "source": src_data.get("source", ""),
                     "relationship": edge.get("type", "RELATED_TO"),
-                    "connected_entity": tgt_data.get("name", "Unknown"),
-                    "connected_type": [tgt_data.get("type", "Unknown")],
+                    "connected_entity": tgt_name,
+                    "connected_type": [tgt_type],
                     "connected_source": tgt_data.get("source", ""),
                 })
+
+        # Step 4 — Also run query_graph for the LLM explanation context,
+        # but FILTER results to only rows involving focal or neighbour entities.
+        allowed_names = focal_names | neighbour_names
+
+        for term in search_terms:
+            qr = self.graph_manager.query_graph(term)
+            for row in qr:
+                if self._row_involves_allowed(row, allowed_names):
+                    all_results.append(row)
+
+        qr_full = self.graph_manager.query_graph(query)
+        for row in qr_full:
+            if self._row_involves_allowed(row, allowed_names):
+                all_results.append(row)
 
         # Deduplicate
         all_results = self._deduplicate_results(all_results)
@@ -134,7 +186,7 @@ class QueryAgent:
         # Extract sources
         sources = self._extract_sources(all_results)
 
-        # Step 4 — LLM explanation
+        # Step 5 — LLM explanation
         explanation = self._explain_embedded_results(query, all_results, sources)
 
         return {
@@ -144,7 +196,27 @@ class QueryAgent:
             "explanation": explanation,
             "result_count": len(all_results),
             "sources": sources,
+            "focal_entities": focal_display_names,
         }
+
+    @staticmethod
+    def _row_involves_allowed(row: Dict[str, Any],
+                              allowed_names: set) -> bool:
+        """
+        Return True only if at least one entity name in this result row
+        is in the allowed set (focal entities + their 1-hop neighbours).
+        This prevents unrelated clusters from polluting the graph view.
+        """
+        for key in ("entity", "name", "connected_entity",
+                     "n.name", "m.name"):
+            val = row.get(key)
+            if isinstance(val, str) and val.strip().lower() in allowed_names:
+                return True
+            if isinstance(val, dict):
+                n = val.get("name", "")
+                if n and n.strip().lower() in allowed_names:
+                    return True
+        return False
 
     def _extract_search_terms(self, query: str) -> List[str]:
         """Use LLM to pull out the key entity names / topics from the query."""
@@ -194,7 +266,7 @@ Return ONLY the JSON array."""),
                 SystemMessage(content="""You are explaining knowledge graph search results.
 Give a clear, concise answer to the user's question based on the graph data provided.
 Mention specific entity names and relationships.
-If source documents are listed, mention them at the end as: " Source: [name]"
+If source documents are listed, mention them at the end as: "📄 Source: [name]"
 Do NOT say "the search results show" — just answer the question directly."""),
                 HumanMessage(content=f"""
 Question: {query}
@@ -285,11 +357,25 @@ Answer the question based on this data."""),
                 neighbourhood = self.graph_manager.get_neighbourhood(
                     matched_names, depth=1
                 )
+                # Build a node lookup so we can include type info
+                _nb_nodes = {}
+                for n in neighbourhood.get("nodes", []):
+                    _nb_nodes[n.get("label") or n.get("id", "")] = n
+
                 for edge in neighbourhood.get("edges", []):
+                    src_name = edge.get("source", "?")
+                    tgt_name = edge.get("target", "?")
+                    src_node = _nb_nodes.get(src_name, {})
+                    tgt_node = _nb_nodes.get(tgt_name, {})
+
                     results.append({
-                        "entity": edge.get("source", "?"),
+                        "entity": src_name,
+                        "entity_type": [src_node.get("type")
+                                        or src_node.get("properties", {}).get("type", "Unknown")],
                         "relationship": edge.get("type", "RELATED_TO"),
-                        "connected_entity": edge.get("target", "?"),
+                        "connected_entity": tgt_name,
+                        "connected_type": [tgt_node.get("type")
+                                           or tgt_node.get("properties", {}).get("type", "Unknown")],
                     })
 
             # If Cypher returned nothing, include the entity info directly
@@ -312,6 +398,18 @@ Answer the question based on this data."""),
         sources = self._extract_sources(results)
         explanation = self.explain_results(query, cypher, results, sources)
 
+        # Extract focal entity names for graph rendering
+        cypher_focal = []
+        if hasattr(self.graph_manager, "semantic_search"):
+            _terms = self._extract_search_terms(query) if 'search_terms' not in dir() else search_terms
+            for term in _terms:
+                hits = self.graph_manager.semantic_search(term, top_k=3)
+                for hit in hits:
+                    name = hit.get("name", "")
+                    sim = self._name_similarity(term, name)
+                    if sim >= 0.45 and name not in cypher_focal:
+                        cypher_focal.append(name)
+
         return {
             "success": True,
             "query": cypher,
@@ -319,6 +417,7 @@ Answer the question based on this data."""),
             "explanation": explanation,
             "result_count": len(results),
             "sources": sources,
+            "focal_entities": cypher_focal,
         }
 
     def generate_cypher_query(self, natural_language_query: str) -> Optional[str]:

@@ -214,9 +214,10 @@ def send_query(query_text):
     gn = st.session_state.graphnet
     if not gn or not st.session_state.initialized:
         reply = "⚠️ GraphNet is not initialised. Please check your configuration."
-        entities, relationships = [], []
+        entities, relationships, focal_entities = [], [], []
     else:
         result = gn.query(query_text)
+        focal_entities = result.get("focal_entities", []) if isinstance(result, dict) else []
         if result.get("success"):
             explanation = result.get("explanation") or "Query executed successfully."
             raw = result.get("results", [])
@@ -316,6 +317,7 @@ def send_query(query_text):
         "msg_id": ai_msg_id,
         "entities": entities,
         "relationships": relationships,
+        "focal_entities": focal_entities,
     })
     save_current_session()
 
@@ -369,6 +371,36 @@ def render_graph(msg):
 
     entities = msg.get("entities", [])
     rels = msg.get("relationships", [])
+    focal = msg.get("focal_entities", [])
+
+    # ── Star-graph filter ────────────────────────────────────────────
+    # If we know which entities were queried (focal), restrict the graph
+    # to ONLY the focal node(s) and their direct 1-hop connections.
+    # This prevents unrelated clusters from appearing.
+    if focal and (entities or rels):
+        focal_lower = {f.strip().lower() for f in focal}
+
+        # Keep only relationships where at least one end is a focal entity
+        filtered_rels = []
+        connected_names = set()
+        for r in rels:
+            s = r.get("source", "").strip()
+            t = r.get("target", "").strip()
+            if s.lower() in focal_lower or t.lower() in focal_lower:
+                filtered_rels.append(r)
+                connected_names.add(s)
+                connected_names.add(t)
+        rels = filtered_rels
+
+        # Keep only entities that are focal or directly connected
+        allowed = focal_lower | {n.lower() for n in connected_names}
+        entities = [e for e in entities if e["name"].strip().lower() in allowed]
+
+        # Make sure focal entities themselves are in the list
+        entity_names_lower = {e["name"].strip().lower() for e in entities}
+        for fn in focal:
+            if fn.strip().lower() not in entity_names_lower:
+                entities.append({"name": fn.strip(), "type": "Other"})
 
     if not entities and not rels:
         # Fall back to fetching full graph
@@ -390,13 +422,24 @@ def render_graph(msg):
         net = Network(height="600px", width="100%", bgcolor="#17171a",
                       font_color="#e8e8ec", directed=True)
         net.set_options("""{
-          "physics":{"enabled":true,"stabilization":{"iterations":120}},
+          "physics":{
+            "enabled":true,
+            "barnesHut":{
+              "gravitationalConstant":-15000,
+              "centralGravity":0.25,
+              "springLength":350,
+              "springConstant":0.02,
+              "damping":0.15,
+              "avoidOverlap":0.6
+            },
+            "stabilization":{"iterations":200}
+          },
           "interaction":{"hover":true,"navigationButtons":true,"zoomView":true},
           "edges":{
             "color":{"color":"#5eead4","highlight":"#99f6e4","hover":"#99f6e4","inherit":false},
-            "width":2,
-            "arrows":{"to":{"enabled":true,"scaleFactor":1.0}},
-            "font":{"color":"#e8e8ec","size":11,"strokeWidth":0},
+            "width":1.8,
+            "arrows":{"to":{"enabled":true,"scaleFactor":0.8}},
+            "font":{"color":"#b8b8c0","size":9,"strokeWidth":2,"strokeColor":"#17171a"},
             "smooth":{"type":"continuous"}
           }
         }""")
@@ -405,25 +448,57 @@ def render_graph(msg):
             "Person": "#a89cf9", "Organization": "#7df3e4",
             "Location": "#fbbf24", "Concept": "#f472b6",
             "Product": "#4ade80", "Technology": "#60a5fa",
+            "Document": "#a78bfa", "Project": "#38bdf8",
+            "Task": "#fb923c", "Role": "#f9a8d4",
+            "Department": "#34d399", "Event": "#c084fc",
+            "Date": "#fcd34d", "Skill": "#67e8f9",
+            "Policy": "#fda4af", "Risk": "#f87171",
+            "Decision": "#fdba74", "Regulation": "#d8b4fe",
+            "Contract": "#86efac", "Resource": "#93c5fd",
+            "Deliverable": "#fca5a5", "Qualification": "#a5f3fc",
+            "Metric": "#d9f99d", "Course": "#e9d5ff",
+            "Standard": "#bfdbfe",
         }
+        DEFAULT_COLOR = "#9b9baa"
         added = set()
 
         # Build node metadata for the click panel
         # Fetch descriptions and sources from the graph for each entity
         node_meta = {}
 
+        # Pre-build a name→node lookup from the graph for reliable type resolution
+        _name_lookup = {}
+        if hasattr(gn.graph_manager, 'graph'):
+            for _nid in gn.graph_manager.graph.nodes():
+                _nd = gn.graph_manager.graph.nodes[_nid]
+                _n = _nd.get("name", "").strip().lower()
+                if _n:
+                    _name_lookup[_n] = _nd
+
         def _humanize_rel(rel_type):
             """WORKS_FOR → 'works for', LOCATED_IN → 'located in'"""
             return rel_type.replace("_", " ").lower()
 
         def _fetch_entity_info(name):
-            """Pull description + source from the graph manager."""
-            info = {"description": "", "source": ""}
+            """Pull description, source, AND type from the graph."""
+            info = {"description": "", "source": "", "type": ""}
             try:
+                # Try get_entity first (works for both Neo4j and embedded)
                 entity_data = gn.graph_manager.get_entity(name)
                 if entity_data:
                     info["description"] = entity_data.get("description", "")
                     info["source"] = entity_data.get("source", "")
+                    info["type"] = entity_data.get("type", "")
+
+                # Fallback: direct graph node lookup by name (embedded mode)
+                if not info["type"]:
+                    nd = _name_lookup.get(name.strip().lower())
+                    if nd:
+                        info["type"] = nd.get("type", "")
+                        if not info["description"]:
+                            info["description"] = nd.get("description", "")
+                        if not info["source"]:
+                            info["source"] = nd.get("source", "")
             except Exception:
                 pass
             return info
@@ -433,11 +508,27 @@ def render_graph(msg):
             nid = e["name"]
             if nid not in added:
                 etype = e.get("type", "Other")
-                color = COLORS.get(etype, "#9b9baa")
-                net.add_node(nid, label=nid, color=color, size=22,
-                             title=f"{etype}: {nid}")
-                added.add(nid)
                 info = _fetch_entity_info(nid)
+                # If the query result gave a vague type, use the real one from the graph
+                if etype in ("Other", "Unknown", "") and info["type"]:
+                    etype = info["type"]
+                color = COLORS.get(etype, DEFAULT_COLOR)
+
+                # Focal nodes are larger with a gold border (star center)
+                is_focal = focal and nid.strip().lower() in {f.strip().lower() for f in focal}
+                node_size = 35 if is_focal else 22
+                border_color = "#FFD700" if is_focal else color
+                node_opts = dict(
+                    label=nid, color={"background": color,
+                                       "border": border_color,
+                                       "highlight": {"background": color,
+                                                     "border": "#FFD700"}},
+                    size=node_size,
+                    borderWidth=3 if is_focal else 1,
+                    title=f"{etype}: {nid}",
+                )
+                net.add_node(nid, **node_opts)
+                added.add(nid)
                 node_meta[nid] = {
                     "type": etype,
                     "color": color,
@@ -457,12 +548,15 @@ def render_graph(msg):
 
             for nid in [s, t]:
                 if nid not in added:
-                    net.add_node(nid, label=nid, color="#9b9baa", size=18)
-                    added.add(nid)
                     info = _fetch_entity_info(nid)
+                    # Use the REAL type from the graph, not hardcoded "Unknown"
+                    real_type = info["type"] or "Other"
+                    color = COLORS.get(real_type, DEFAULT_COLOR)
+                    net.add_node(nid, label=nid, color=color, size=18)
+                    added.add(nid)
                     node_meta[nid] = {
-                        "type": "Unknown",
-                        "color": "#9b9baa",
+                        "type": real_type,
+                        "color": color,
                         "description": info["description"],
                         "source": info["source"],
                         "connections": [],
@@ -595,6 +689,25 @@ def render_graph(msg):
     "Concept":      {bg:"#ec489922", fg:"#f472b6", bd:"#ec489940"},
     "Product":      {bg:"#22c55e22", fg:"#4ade80", bd:"#22c55e40"},
     "Technology":   {bg:"#3b82f622", fg:"#60a5fa", bd:"#3b82f640"},
+    "Document":     {bg:"#7c3aed22", fg:"#a78bfa", bd:"#7c3aed40"},
+    "Project":      {bg:"#0ea5e922", fg:"#38bdf8", bd:"#0ea5e940"},
+    "Task":         {bg:"#f9731622", fg:"#fb923c", bd:"#f9731640"},
+    "Role":         {bg:"#ec489922", fg:"#f9a8d4", bd:"#ec489940"},
+    "Department":   {bg:"#10b98122", fg:"#34d399", bd:"#10b98140"},
+    "Event":        {bg:"#a855f722", fg:"#c084fc", bd:"#a855f740"},
+    "Date":         {bg:"#eab30822", fg:"#fcd34d", bd:"#eab30840"},
+    "Risk":         {bg:"#ef444422", fg:"#f87171", bd:"#ef444440"},
+    "Skill":        {bg:"#06b6d422", fg:"#67e8f9", bd:"#06b6d440"},
+    "Policy":       {bg:"#fb718522", fg:"#fda4af", bd:"#fb718540"},
+    "Decision":     {bg:"#f9731622", fg:"#fdba74", bd:"#f9731640"},
+    "Regulation":   {bg:"#a855f722", fg:"#d8b4fe", bd:"#a855f740"},
+    "Contract":     {bg:"#22c55e22", fg:"#86efac", bd:"#22c55e40"},
+    "Resource":     {bg:"#3b82f622", fg:"#93c5fd", bd:"#3b82f640"},
+    "Deliverable":  {bg:"#ef444422", fg:"#fca5a5", bd:"#ef444440"},
+    "Qualification":{bg:"#06b6d422", fg:"#a5f3fc", bd:"#06b6d440"},
+    "Metric":       {bg:"#84cc1622", fg:"#d9f99d", bd:"#84cc1640"},
+    "Course":       {bg:"#a855f722", fg:"#e9d5ff", bd:"#a855f740"},
+    "Standard":     {bg:"#3b82f622", fg:"#bfdbfe", bd:"#3b82f640"},
   };
   var defaultPill = {bg:"#6b6b7822", fg:"#9b9baa", bd:"#6b6b7840"};
 
