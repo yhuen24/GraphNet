@@ -327,7 +327,21 @@ class EntityExtractor:
         Returns:
             Parsed dictionary or None
         """
-        response_text = response.content.strip()
+        # Handle Gemini 3 Flash list-of-blocks responses
+        content = response.content
+        if isinstance(content, str):
+            response_text = content.strip()
+        elif isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, str):
+                    parts.append(block)
+                elif isinstance(block, dict):
+                    if block.get("type") == "text" or "text" in block:
+                        parts.append(block.get("text", ""))
+            response_text = "".join(parts).strip()
+        else:
+            response_text = str(content).strip()
 
         # Remove markdown code blocks if present
         response_text = re.sub(r'```json\s*', '', response_text)

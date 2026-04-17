@@ -5,56 +5,53 @@ Embeds entity names + descriptions using Google's Gemini embedding API so that
 user queries like "dangote" match "Dangote Group" even with typos or
 different phrasing.  Uses the new google.genai SDK with gemini-embedding-001.
 
-Falls back to TF-IDF (scikit-learn) if embedding API is unavailable.
+Storage backend: ChromaDB (persistent local vector database).
+Falls back to TF-IDF (scikit-learn) if the embedding API is unavailable.
 """
 
 import logging
-import json
-import os
-import numpy as np
 from typing import List, Dict, Any, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
 
-# ── Vector math helpers (no heavy deps) ──────────────────────────────────────
-
-def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
-    """Cosine similarity between two vectors."""
-    dot = np.dot(a, b)
-    na, nb = np.linalg.norm(a), np.linalg.norm(b)
-    if na == 0 or nb == 0:
-        return 0.0
-    return float(dot / (na * nb))
-
-
 class EmbeddingStore:
     """
-    Manages a lightweight in-memory vector index over graph entities.
+    Manages a persistent ChromaDB vector index over graph entities.
 
-    Each entry is:
-        { "node_id": str, "text": str, "embedding": List[float] }
+    Each entry stores:
+        - id       : node_id  (e.g. "organization:dangote group")
+        - embedding: List[float] from Gemini or TF-IDF
+        - document : the text that was embedded
+        - metadata : {"node_id": ..., "text": ...}
 
-    The store tries Google's Generative AI embedding model first; if that
-    fails (no key, network error) it falls back to a local TF-IDF approach
-    so the system always works.
+    Public API is identical to the old JSON-based store so nothing else
+    in the codebase needs to change.
     """
 
-    def __init__(self, persist_file: str = "graphnet_embeddings.json"):
-        self.persist_file = persist_file
-        self.entries: List[Dict[str, Any]] = []  # {"node_id", "text", "embedding"}
-        self._matrix: Optional[np.ndarray] = None  # cached N×D matrix
-        self._embed_fn = None  # callable: List[str] → List[List[float]]
-        self._mode = "none"
-        self._dirty = False
+    COLLECTION_NAME = "graphnet_entities"
 
-    # ── Initialisation ───────────────────────────────────────────────────────
+    def __init__(self, persist_file: str = "graphnet_embeddings.json"):
+        # persist_file is kept as a parameter for API compatibility but is
+        # no longer used — ChromaDB manages its own directory.
+        self._chroma_dir = "graphnet_chroma_db"
+        self._client = None
+        self._collection = None
+        self._embed_fn = None
+        self._mode = "none"
+
+        # TF-IDF fallback state
+        self._tfidf = None
+        self._tfidf_fitted = False
+
+    # ── Initialisation ────────────────────────────────────────────────────────
 
     def initialize(self, google_api_key: str = "") -> bool:
         """
-        Set up the embedding function.  Tries Google first, then TF-IDF.
+        Set up the embedding function and connect to ChromaDB.
+        Tries Google first, then TF-IDF.
         """
-        # Try Google embedding (new google.genai SDK)
+        # 1. Set up embedding backend
         if google_api_key:
             try:
                 from google import genai
@@ -85,7 +82,7 @@ class EmbeddingStore:
             except Exception as e:
                 logger.warning(f"Google embedding unavailable ({e}), trying TF-IDF fallback")
 
-        # Fallback — TF-IDF via scikit-learn
+        # 2. TF-IDF fallback
         if self._embed_fn is None:
             try:
                 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -100,44 +97,30 @@ class EmbeddingStore:
                 self._mode = "none"
                 return False
 
-        # Load persisted embeddings
-        self._load()
-        return True
-
-    # ── Persistence ──────────────────────────────────────────────────────────
-
-    def _load(self):
-        if not os.path.exists(self.persist_file):
-            return
+        # 3. Connect to ChromaDB
         try:
-            with open(self.persist_file, "r") as f:
-                data = json.load(f)
-            self.entries = data.get("entries", [])
-            self._rebuild_matrix()
-            logger.info(f"Loaded {len(self.entries)} embeddings from {self.persist_file}")
+            import chromadb
+
+            self._client = chromadb.PersistentClient(path=self._chroma_dir)
+
+            self._collection = self._client.get_or_create_collection(
+                name=self.COLLECTION_NAME,
+                metadata={"hnsw:space": "cosine"},
+            )
+            logger.info(
+                f"EmbeddingStore: ChromaDB ready at '{self._chroma_dir}' "
+                f"({self._collection.count()} entities loaded)"
+            )
+            return True
+
+        except ImportError:
+            logger.error("chromadb is not installed. Run: pip install chromadb")
+            return False
         except Exception as e:
-            logger.warning(f"Could not load embeddings: {e}")
+            logger.error(f"ChromaDB init failed: {e}")
+            return False
 
-    def save(self):
-        """Persist embeddings to disk."""
-        if not self._dirty:
-            return
-        try:
-            with open(self.persist_file, "w") as f:
-                json.dump({"entries": self.entries}, f)
-            self._dirty = False
-            logger.info(f"Saved {len(self.entries)} embeddings to {self.persist_file}")
-        except Exception as e:
-            logger.error(f"Error saving embeddings: {e}")
-
-    def _rebuild_matrix(self):
-        """Rebuild the numpy matrix from self.entries for fast search."""
-        if self.entries:
-            self._matrix = np.array([e["embedding"] for e in self.entries], dtype=np.float32)
-        else:
-            self._matrix = None
-
-    # ── Core operations ──────────────────────────────────────────────────────
+    # ── Embedding helpers ─────────────────────────────────────────────────────
 
     def _embed(self, texts: List[str]) -> List[List[float]]:
         """Embed a batch of texts using the active backend."""
@@ -146,42 +129,72 @@ class EmbeddingStore:
         elif self._mode == "tfidf":
             return self._tfidf_embed(texts)
         else:
-            # No backend — return zero vectors
             return [[0.0] * 64 for _ in texts]
 
     def _tfidf_embed(self, texts: List[str]) -> List[List[float]]:
         """Embed using the TF-IDF vectoriser."""
-        if not self._tfidf_fitted and self.entries:
-            corpus = [e["text"] for e in self.entries]
-            self._tfidf.fit(corpus + texts)
-            self._tfidf_fitted = True
-            # Re-embed everything with the new vocabulary
-            all_texts = [e["text"] for e in self.entries]
-            if all_texts:
-                vecs = self._tfidf.transform(all_texts).toarray()
-                for i, entry in enumerate(self.entries):
-                    entry["embedding"] = vecs[i].tolist()
-                self._rebuild_matrix()
-                self._dirty = True
-
         if not self._tfidf_fitted:
-            self._tfidf.fit(texts)
+            existing = self._all_texts()
+            corpus = existing + texts if existing else texts
+            self._tfidf.fit(corpus)
             self._tfidf_fitted = True
+
+            # Re-embed everything already stored so vectors stay consistent
+            if existing:
+                ids = self._all_ids()
+                new_vecs = self._tfidf.transform(existing).toarray().tolist()
+                self._collection.upsert(ids=ids, embeddings=new_vecs)
 
         vecs = self._tfidf.transform(texts).toarray()
         return vecs.tolist()
+
+    # ── ChromaDB helpers ──────────────────────────────────────────────────────
+
+    def _all_ids(self) -> List[str]:
+        """Return all stored IDs (node_ids)."""
+        if self._collection.count() == 0:
+            return []
+        result = self._collection.get(include=[])
+        return result["ids"]
+
+    def _all_texts(self) -> List[str]:
+        """Return all stored document texts."""
+        if self._collection.count() == 0:
+            return []
+        result = self._collection.get(include=["documents"])
+        return result["documents"] or []
+
+    @property
+    def entries(self) -> List[Dict[str, Any]]:
+        """
+        Compatibility shim — exposes indexed entries in the old format
+        used by `main._reindex_existing_entities()`.
+
+        Returns: [{"node_id": str, "text": str}, ...]
+        """
+        if self._collection is None or self._collection.count() == 0:
+            return []
+        result = self._collection.get(include=["documents"])
+        return [
+            {"node_id": id_, "text": doc}
+            for id_, doc in zip(result["ids"], result["documents"])
+        ]
+
+    # ── Public API ────────────────────────────────────────────────────────────
 
     def add_entity(self, node_id: str, name: str, entity_type: str = "",
                    description: str = "") -> None:
         """
         Add or update an entity's embedding.
-
         The text embedded is: "{type}: {name}. {description}"
         """
-        # Check if already present
-        for entry in self.entries:
-            if entry["node_id"] == node_id:
-                return  # Already indexed
+        if self._collection is None:
+            return
+
+        # Skip if already indexed
+        existing = self._collection.get(ids=[node_id], include=[])
+        if existing["ids"]:
+            return
 
         text = f"{entity_type}: {name}"
         if description:
@@ -189,23 +202,26 @@ class EmbeddingStore:
 
         try:
             emb = self._embed([text])[0]
-            self.entries.append({
-                "node_id": node_id,
-                "text": text,
-                "embedding": emb,
-            })
-            self._dirty = True
-            self._rebuild_matrix()
+            self._collection.add(
+                ids=[node_id],
+                embeddings=[emb],
+                documents=[text],
+                metadatas=[{"node_id": node_id, "text": text}],
+            )
         except Exception as e:
             logger.error(f"Failed to embed entity {node_id}: {e}")
 
     def add_entities_batch(self, entities: List[Dict[str, str]]) -> None:
         """
-        Batch-add entities.  Each dict must have: node_id, name.
+        Batch-add entities. Each dict must have: node_id, name.
         Optional: entity_type, description.
         """
-        existing_ids = {e["node_id"] for e in self.entries}
-        new_entities = [e for e in entities if e["node_id"] not in existing_ids]
+        if self._collection is None or not entities:
+            return
+
+        # Filter out already-indexed entities
+        all_ids = set(self._all_ids())
+        new_entities = [e for e in entities if e["node_id"] not in all_ids]
         if not new_entities:
             return
 
@@ -218,14 +234,15 @@ class EmbeddingStore:
 
         try:
             embeddings = self._embed(texts)
-            for ent, emb in zip(new_entities, embeddings):
-                self.entries.append({
-                    "node_id": ent["node_id"],
-                    "text": texts[new_entities.index(ent)],
-                    "embedding": emb,
-                })
-            self._dirty = True
-            self._rebuild_matrix()
+            self._collection.add(
+                ids=[e["node_id"] for e in new_entities],
+                embeddings=embeddings,
+                documents=texts,
+                metadatas=[
+                    {"node_id": e["node_id"], "text": t}
+                    for e, t in zip(new_entities, texts)
+                ],
+            )
         except Exception as e:
             logger.error(f"Batch embedding failed: {e}")
 
@@ -242,35 +259,58 @@ class EmbeddingStore:
         Returns:
             List of (node_id, similarity_score) tuples.
         """
-        if not self.entries or self._matrix is None:
+        if self._collection is None or self._collection.count() == 0:
             return []
 
         try:
-            q_emb = np.array(self._embed([query])[0], dtype=np.float32)
-            # Cosine similarity against the whole matrix
-            norms = np.linalg.norm(self._matrix, axis=1)
-            q_norm = np.linalg.norm(q_emb)
-            if q_norm == 0:
-                return []
-            sims = self._matrix @ q_emb / (norms * q_norm + 1e-10)
+            q_emb = self._embed([query])[0]
 
-            # Rank
-            indices = np.argsort(-sims)
-            results = []
-            for idx in indices[:top_k]:
-                score = float(sims[idx])
-                if score < threshold:
-                    break
-                results.append((self.entries[idx]["node_id"], score))
-            return results
+            results = self._collection.query(
+                query_embeddings=[q_emb],
+                n_results=min(top_k, self._collection.count()),
+                include=["metadatas", "distances"],
+            )
+
+            output = []
+            for node_id, distance in zip(
+                results["ids"][0], results["distances"][0]
+            ):
+                # ChromaDB cosine space returns distance (0=identical, 2=opposite)
+                # Convert to similarity score in [0, 1]
+                score = 1.0 - (distance / 2.0)
+                if score >= threshold:
+                    output.append((node_id, round(score, 4)))
+
+            return output
 
         except Exception as e:
             logger.error(f"Embedding search failed: {e}")
             return []
 
-    def clear(self):
-        """Remove all embeddings."""
-        self.entries = []
-        self._matrix = None
-        self._dirty = True
-        self.save()
+    def save(self) -> None:
+        """
+        No-op — ChromaDB persists automatically on every write.
+        Kept for API compatibility with the rest of the codebase.
+        """
+        logger.debug("EmbeddingStore.save() called — ChromaDB auto-persists, nothing to do.")
+
+    def clear(self) -> None:
+        """Remove all embeddings from the collection."""
+        if self._client is None:
+            return
+        try:
+            self._client.delete_collection(self.COLLECTION_NAME)
+            self._collection = self._client.get_or_create_collection(
+                name=self.COLLECTION_NAME,
+                metadata={"hnsw:space": "cosine"},
+            )
+            self._tfidf_fitted = False
+            logger.info("EmbeddingStore: collection cleared.")
+        except Exception as e:
+            logger.error(f"Failed to clear collection: {e}")
+
+    def count(self) -> int:
+        """Return the number of indexed entities."""
+        if self._collection is None:
+            return 0
+        return self._collection.count()

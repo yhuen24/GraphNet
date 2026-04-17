@@ -3,6 +3,8 @@ Main module for GraphNet application.
 Core functionality for building and querying the knowledge graph.
 
 v2 — Canonical normalization, embedding store integration.
+v3 — ChunkStore integration: stores original document text chunks for
+     reasoning-based query answering.
 """
 
 import logging
@@ -17,6 +19,7 @@ from config import config
 from ai.document_processor import DocumentProcessor
 from ai.entity_extractor import EntityExtractor, SimpleEntityExtractor
 from ai.embedding_store import EmbeddingStore
+from ai.chunk_store import ChunkStore
 from utils.normalization import canonical_key, display_name
 
 # Import appropriate graph manager based on configuration
@@ -45,6 +48,7 @@ class GraphNet:
         self.graph_manager = GraphManager()
         self.entity_extractor = EntityExtractor()
         self.embedding_store = EmbeddingStore()
+        self.chunk_store = ChunkStore()         # NEW: document chunk storage
         self.query_agent = None
         self.visualizer = GraphVisualizer(self.graph_manager)
         self.document_processor = DocumentProcessor()
@@ -56,6 +60,7 @@ class GraphNet:
             "entity_extractor": False,
             "query_agent": False,
             "embedding_store": False,
+            "chunk_store": False,               # NEW
             "overall": False,
             "errors": [],
         }
@@ -82,7 +87,15 @@ class GraphNet:
                 status["errors"].append("Embedding store init failed (semantic search disabled)")
                 logger.warning("✗ Embedding store failed — fuzzy search still works")
 
-            # 3. Entity extractor
+            # 3. Initialize chunk store (NEW)
+            if self.chunk_store.initialize(google_api_key=config.GOOGLE_API_KEY):
+                status["chunk_store"] = True
+                logger.info(f"✓ Chunk store initialized ({self.chunk_store.count()} chunks)")
+            else:
+                status["errors"].append("Chunk store init failed (document context disabled)")
+                logger.warning("✗ Chunk store failed — queries will work without document context")
+
+            # 4. Entity extractor
             if self.entity_extractor.initialize():
                 status["entity_extractor"] = True
                 logger.info("✓ Entity extractor initialized")
@@ -90,8 +103,11 @@ class GraphNet:
                 status["errors"].append("Entity extractor init failed — will use fallback")
                 logger.warning("✗ Entity extractor initialization failed")
 
-            # 4. Query agent
-            self.query_agent = QueryAgent(self.graph_manager)
+            # 5. Query agent — now receives chunk_store for reasoning
+            self.query_agent = QueryAgent(
+                self.graph_manager,
+                chunk_store=self.chunk_store if status["chunk_store"] else None,
+            )
             if self.query_agent.initialize():
                 status["query_agent"] = True
                 logger.info("✓ Query agent initialized")
@@ -193,6 +209,17 @@ class GraphNet:
             chunks = self.document_processor.chunk_text(text)
             logger.info(f"Split into {len(chunks)} chunks")
 
+            # ══════════════════════════════════════════════════════════════
+            # Step 2.5 (NEW): Store chunks for later retrieval by QueryAgent
+            # ══════════════════════════════════════════════════════════════
+            chunks_stored = 0
+            if self.chunk_store:
+                try:
+                    chunks_stored = self.chunk_store.store_chunks(chunks, filename)
+                    logger.info(f"Stored {chunks_stored} chunks for document context")
+                except Exception as e:
+                    logger.warning(f"Chunk storage failed (non-fatal): {e}")
+
             # Step 3: Extract entities & relationships
             if self.entity_extractor.initialized:
                 extraction_result = self.entity_extractor.extract_from_chunks(
@@ -250,6 +277,7 @@ class GraphNet:
                 "filename": filename,
                 "text_length": len(text),
                 "chunks": len(chunks),
+                "chunks_stored": chunks_stored,     # NEW
                 "entities_extracted": len(entities),
                 "relationships_extracted": len(relationships),
                 "entities_added": entities_added,
@@ -310,6 +338,9 @@ class GraphNet:
         return self.visualizer.generate_focused_visualization(node_name)
 
     def clear_graph(self) -> bool:
+        # Also clear chunks when graph is cleared
+        if self.chunk_store:
+            self.chunk_store.clear()
         return self.graph_manager.clear_graph()
 
     def export_graph(self, filename: str = "graph_export.json") -> str:
@@ -321,6 +352,8 @@ class GraphNet:
             self.graph_manager.close()
         if self.embedding_store:
             self.embedding_store.save()
+        if self.chunk_store:
+            self.chunk_store.save()
         logger.info("GraphNet shutdown complete")
 
 
@@ -337,6 +370,7 @@ if __name__ == "__main__":
     print("\nInitialization Status:")
     print(f"  Graph Database:    {'✓' if init_status['graph_manager'] else '✗'}")
     print(f"  Embedding Store:   {'✓' if init_status['embedding_store'] else '✗'}")
+    print(f"  Chunk Store:       {'✓' if init_status.get('chunk_store') else '✗'}")
     print(f"  Entity Extractor:  {'✓' if init_status['entity_extractor'] else '✗'}")
     print(f"  Query Agent:       {'✓' if init_status['query_agent'] else '✗'}")
 
