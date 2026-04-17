@@ -59,9 +59,9 @@ DATE_PROPERTY_KEYS = {
 }
 
 # Default chunk configuration
-DEFAULT_CHUNK_SIZE = 3500
-DEFAULT_CHUNK_OVERLAP = 500
-MAX_SINGLE_EXTRACT_LENGTH = 4000
+DEFAULT_CHUNK_SIZE = 40000
+DEFAULT_CHUNK_OVERLAP = 2000
+MAX_SINGLE_EXTRACT_LENGTH = 50000
 
 
 # =============================================================================
@@ -803,9 +803,6 @@ class EntityExtractor:
                 failed_chunks.append(i)
                 logger.warning(f"Chunk {i + 1} failed: {result.get('error', 'Unknown error')}")
 
-            # # Rate limit protection between chunks
-            # if i < len(chunks) - 1:
-            #     time.sleep(0.5)
 
         result = {
             "entities": list(all_entities.values()),
