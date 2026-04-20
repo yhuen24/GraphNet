@@ -259,6 +259,32 @@ class QueryAgent:
             query, all_results, document_chunks, sources
         )
 
+        # ── Derive focal entities from the LLM's actual answer ──────────
+        # so the graph only shows nodes the text response discusses,
+        # not every entity the broad semantic search touched.
+        answer_focal = []
+        if explanation:
+            explanation_lower = explanation.lower()
+            candidate_names = set()
+            # Names from structured results
+            for row in all_results:
+                for key in ("entity", "name", "connected_entity"):
+                    val = row.get(key)
+                    if isinstance(val, str) and val.strip():
+                        candidate_names.add(val.strip())
+            # Also include names found by semantic search — these may
+            # not appear in all_results but could be in the LLM answer
+            for name in focal_display_names:
+                candidate_names.add(name)
+            for name in candidate_names:
+                if name.lower() in explanation_lower and name not in answer_focal:
+                    answer_focal.append(name)
+
+        # Fallback: if LLM used different phrasing and nothing matched,
+        # keep the search-derived focal names (capped)
+        if not answer_focal:
+            answer_focal = focal_display_names[:5]
+
         return {
             "success": True,
             "query": f"[semantic search: {search_terms}]",
@@ -266,7 +292,7 @@ class QueryAgent:
             "explanation": explanation,
             "result_count": len(all_results),
             "sources": sources,
-            "focal_entities": focal_display_names,
+            "focal_entities": answer_focal,
         }
 
     # =====================================================================
@@ -604,16 +630,37 @@ Return ONLY the JSON array."""),
         # ── NEW: reasoning-based explanation ──
         explanation = self._reason_over_evidence(query, results, document_chunks, sources)
 
-        # Focal entities for graph rendering
+        # Focal entities for graph rendering — derived from the LLM answer
+        # so the graph only shows nodes the text response discusses.
         cypher_focal = []
-        if hasattr(self.graph_manager, "semantic_search"):
+        if explanation:
+            explanation_lower = explanation.lower()
+            candidate_names = set()
+            for row in results:
+                for key in ("entity", "name", "connected_entity"):
+                    val = row.get(key)
+                    if isinstance(val, str) and val.strip():
+                        candidate_names.add(val.strip())
+            # Also include semantic search hits
+            if hasattr(self.graph_manager, "semantic_search"):
+                for term in search_terms:
+                    for hit in self.graph_manager.semantic_search(term, top_k=3):
+                        name = hit.get("name", "")
+                        if name:
+                            candidate_names.add(name.strip())
+            for name in candidate_names:
+                if name.lower() in explanation_lower and name not in cypher_focal:
+                    cypher_focal.append(name)
+
+        # Fallback: if nothing matched, use semantic search hits
+        if not cypher_focal and hasattr(self.graph_manager, "semantic_search"):
             _terms = search_terms or self._extract_search_terms(query)
-            for term in _terms:
+            for term in _terms[:2]:
                 hits = self.graph_manager.semantic_search(term, top_k=3)
                 for hit in hits:
                     name = hit.get("name", "")
                     sim = self._name_similarity(term, name)
-                    if sim >= 0.45 and name not in cypher_focal:
+                    if sim >= 0.6 and name not in cypher_focal:
                         cypher_focal.append(name)
 
         return {

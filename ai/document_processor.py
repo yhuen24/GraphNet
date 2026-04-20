@@ -30,9 +30,9 @@ logger = logging.getLogger(__name__)
 # Claude, GPT-4o all handle 20k+ char chunks comfortably).
 # =============================================================================
 
-DEFAULT_CHUNK_SIZE = 40000      # ~10k tokens — fits easily in Gemini's context
-DEFAULT_CHUNK_OVERLAP = 2000    # 5% overlap — enough to catch boundary entities
-MIN_REASONABLE_CHUNK_SIZE = 8000  # Anything smaller is legacy-tier and slow
+DEFAULT_CHUNK_SIZE = 6000        # ~1.5k tokens - forces dense extraction
+DEFAULT_CHUNK_OVERLAP = 1000     # Gives enough overlap to catch boundary relationships
+MIN_REASONABLE_CHUNK_SIZE = 2000
 
 
 class DocumentProcessor:

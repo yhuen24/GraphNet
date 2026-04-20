@@ -373,34 +373,64 @@ def render_graph(msg):
     rels = msg.get("relationships", [])
     focal = msg.get("focal_entities", [])
 
-    # ── Star-graph filter ────────────────────────────────────────────
-    # If we know which entities were queried (focal), restrict the graph
-    # to ONLY the focal node(s) and their direct 1-hop connections.
-    # This prevents unrelated clusters from appearing.
-    if focal and (entities or rels):
-        focal_lower = {f.strip().lower() for f in focal}
+    # ── Focused graph: only show entities + connections from the answer ──
+    # Fetches relationships from Neo4j but ONLY keeps connections where
+    # the connected entity is also mentioned in the answer text.
+    # This ensures the graph mirrors exactly what the text discusses.
+    if focal and hasattr(gn, 'graph_manager'):
+        gm = gn.graph_manager
+        entities = []
+        rels = []
+        seen_names = set()
+        answer_lower = msg.get("content", "").lower()
+        focal_lower_set = {f.strip().lower() for f in focal}
 
-        # Keep only relationships where at least one end is a focal entity
-        filtered_rels = []
-        connected_names = set()
-        for r in rels:
-            s = r.get("source", "").strip()
-            t = r.get("target", "").strip()
-            if s.lower() in focal_lower or t.lower() in focal_lower:
-                filtered_rels.append(r)
-                connected_names.add(s)
-                connected_names.add(t)
-        rels = filtered_rels
+        for focal_name in focal:
+            # Add the focal entity itself
+            if focal_name not in seen_names:
+                seen_names.add(focal_name)
+                entity_data = gm.get_entity(focal_name)
+                etype = "Other"
+                if entity_data:
+                    etype = (entity_data.get("type")
+                             or next(iter(entity_data.get("labels", ["Other"])), "Other"))
+                entities.append({"name": focal_name, "type": etype})
 
-        # Keep only entities that are focal or directly connected
-        allowed = focal_lower | {n.lower() for n in connected_names}
-        entities = [e for e in entities if e["name"].strip().lower() in allowed]
+            # Fetch relationships, but only keep answer-relevant ones
+            try:
+                relationships = gm.get_entity_relationships(focal_name)
+                for row in relationships:
+                    connected = row.get("entity", "")
+                    rel_type = row.get("relationship", "RELATED")
+                    labels = row.get("labels", [])
 
-        # Make sure focal entities themselves are in the list
-        entity_names_lower = {e["name"].strip().lower() for e in entities}
-        for fn in focal:
-            if fn.strip().lower() not in entity_names_lower:
-                entities.append({"name": fn.strip(), "type": "Other"})
+                    if not connected:
+                        continue
+
+                    # FILTER: only keep if the connected entity appears in
+                    # the answer text OR is another focal entity
+                    connected_lower = connected.strip().lower()
+                    in_answer = connected_lower in answer_lower
+                    is_focal = connected_lower in focal_lower_set
+
+                    if not in_answer and not is_focal:
+                        continue
+
+                    if connected not in seen_names:
+                        seen_names.add(connected)
+                        ctype = str(labels[0]) if labels else "Other"
+                        entities.append({"name": connected, "type": ctype})
+
+                    rels.append({
+                        "source": focal_name,
+                        "target": connected,
+                        "type": rel_type,
+                    })
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"Could not fetch relationships for '{focal_name}': {e}"
+                )
 
     if not entities and not rels:
         # Fall back to fetching full graph
