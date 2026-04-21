@@ -241,10 +241,15 @@ class GraphNet:
             for entity in tqdm(entities, desc="Adding entities"):
                 clean = display_name(entity["name"])
 
+                # Merge ALL extracted properties (value, unit, period, etc.)
+                # with the description so they're stored on the graph node.
+                props = dict(entity.get("properties", {}))
+                props["description"] = entity.get("description", "")
+
                 success = self.graph_manager.create_entity(
                     entity_name=clean,
                     entity_type=entity["type"],
-                    properties={"description": entity.get("description", "")},
+                    properties=props,
                     source=filename,
                 )
                 if success:
@@ -254,13 +259,16 @@ class GraphNet:
                 source_clean = display_name(rel["source"])
                 target_clean = display_name(rel["target"])
 
+                rel_props = dict(rel.get("properties", {}))
+                rel_props["description"] = rel.get("description", "")
+
                 success = self.graph_manager.create_relationship(
                     source_entity=source_clean,
                     source_type="Entity",
                     target_entity=target_clean,
                     target_type="Entity",
                     relationship_type=rel["type"].replace(" ", "_").upper(),
-                    properties={"description": rel.get("description", "")},
+                    properties=rel_props,
                 )
                 if success:
                     relationships_added += 1

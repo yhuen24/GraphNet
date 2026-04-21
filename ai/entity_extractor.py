@@ -40,18 +40,27 @@ ENTITY_TYPES = [
 RELATIONSHIP_TYPES = [
     # Hierarchy & Structure
     "WORKS_FOR", "REPORTS_TO", "LOCATED_IN", "PART_OF", "BELONGS_TO", "HOLDS_ROLE",
+    # Operations & Presence
+    "OPERATES_IN", "EMPLOYS",
     # Identity & Skills
     "HAS_SKILL", "TEACHES", "STUDIES",
     # Execution & Projects
     "MANAGES", "PARTICIPATED_IN", "ASSIGNED", "CREATED", "DELIVERED", "OCCURRED_ON",
+    "LAUNCHED",
     # Tasks & Dependencies
     "REQUIRES", "DEPENDS_ON", "PRECEDED_BY", "RESULTED_IN", "MITIGATES",
+    # Causal & Influence
+    "INFLUENCES", "AFFECTED_BY", "BENEFITS_FROM",
     # Goals & Alignment
     "ALIGNS_WITH", "TARGETS",
     # Products & Tools
     "USES_TOOL", "INTEGRATES_WITH", "OWNS",
+    # Financial & Transactions
+    "INVESTED_IN", "SOLD", "ACQUIRED",
     # External
-    "SERVES", "PARTNERS_WITH",
+    "SERVES", "PARTNERS_WITH", "ENGAGES_WITH",
+    # Classification
+    "IS_TYPE_OF", "EXCLUDES",
     # Documents & Auditing
     "AUTHORED", "APPROVED", "REVIEWED", "CONTAINS", "REFERENCES",
     "SUPERSEDES", "COMPLIES_WITH", "CERTIFIES",
@@ -124,30 +133,47 @@ Relationship type MUST be one of: {relationship_types}
 
 Relationship categories for reference:
 - Hierarchy & Structure: WORKS_FOR, REPORTS_TO, LOCATED_IN, PART_OF, BELONGS_TO, HOLDS_ROLE
+- Operations & Presence: OPERATES_IN, EMPLOYS
 - Identity & Skills: HAS_SKILL, TEACHES, STUDIES
-- Execution & Projects: MANAGES, PARTICIPATED_IN, ASSIGNED, CREATED, DELIVERED, OCCURRED_ON
+- Execution & Projects: MANAGES, PARTICIPATED_IN, ASSIGNED, CREATED, DELIVERED, OCCURRED_ON, LAUNCHED
 - Tasks & Dependencies: REQUIRES, DEPENDS_ON, PRECEDED_BY, RESULTED_IN, MITIGATES
+- Causal & Influence: INFLUENCES, AFFECTED_BY, BENEFITS_FROM
 - Goals & Alignment: ALIGNS_WITH, TARGETS
 - Products & Tools: USES_TOOL, INTEGRATES_WITH, OWNS
-- External: SERVES, PARTNERS_WITH
+- Financial & Transactions: INVESTED_IN, SOLD, ACQUIRED
+- External: SERVES, PARTNERS_WITH, ENGAGES_WITH
+- Classification: IS_TYPE_OF, EXCLUDES
 - Documents & Auditing: AUTHORED, APPROVED, REVIEWED, CONTAINS, REFERENCES, SUPERSEDES, COMPLIES_WITH, CERTIFIES
 
 ## Extraction Priority — RELATIONSHIPS ARE CRITICAL
-A high-quality knowledge graph has AT LEAST 2 relationships for every entity.
-Follow these rules to maximise relationship yield:
+A high-quality knowledge graph connects entities meaningfully.
+Follow these rules for relationship extraction:
 
-1. For EVERY entity you extract, actively look for ALL connections it has to other entities in the text.
-2. Extract IMPLICIT relationships, not just explicitly stated ones:
+1. For EVERY entity you extract, look for its STRONGEST connections to other entities in the text.
+2. Prefer SPECIFIC, meaningful relationships over generic ones. Only use REFERENCES as a last resort.
+3. Extract IMPLICIT relationships when they are clearly supported by context:
    - Two people mentioned in the same meeting → both PARTICIPATED_IN that Event
    - A person described in a section about a department → BELONGS_TO or WORKS_FOR
    - A technology mentioned alongside a project → USES_TOOL or INTEGRATES_WITH
    - A document that discusses a policy → REFERENCES or CONTAINS
    - A person with a job title → HOLDS_ROLE
    - An organisation in a city → LOCATED_IN
+   - An organisation with business in a region/market → OPERATES_IN
+   - An organisation that hired staff → EMPLOYS
+   - A product or service that was introduced → LAUNCHED
+   - A company that sold/divested a business unit → SOLD
+   - A company that bought another → ACQUIRED
+   - A factor that impacts performance → INFLUENCES or AFFECTED_BY
+   - An entity that gains advantage from something → BENEFITS_FROM
+   - An entity classified as a type → IS_TYPE_OF
+   - A metric that excludes certain items → EXCLUDES
+   - Stakeholder interaction → ENGAGES_WITH
 3. Extract MULTI-HOP relationships: if A manages B, and B works on project C, extract both A→MANAGES→B and B→ASSIGNED→C.
 4. Look for temporal relationships: events that PRECEDED_BY or RESULTED_IN other events.
 5. Look for hierarchical relationships: departments PART_OF organisations, sub-tasks DEPENDS_ON parent tasks.
-6. If an entity has fewer than 2 relationships, re-read the surrounding text — you likely missed connections.
+6. Look for causal relationships: policies that INFLUENCES outcomes, risks AFFECTED_BY market conditions.
+7. Look for financial relationships: companies that INVESTED_IN, SOLD, or ACQUIRED other entities.
+8. If an entity has ZERO relationships, reconsider whether it is worth extracting at all.
 
 ## Entity Properties
 When extracting entities, include relevant properties as key-value pairs.
@@ -181,6 +207,14 @@ Common properties by entity type:
 - 0.5-0.69: Reasonably inferred
 - Below 0.5: Do not extract
 
+## Selectivity — Quality Over Quantity
+A focused, high-signal graph is better than a cluttered one. Follow these rules:
+- Do NOT extract generic/vague concepts (e.g., "growth", "performance", "strategy", "risk") as standalone entities UNLESS they are a named, specific thing (e.g., "HSBC Growth Strategy 2024", "Operational Risk Framework").
+- Do NOT extract standalone Date entities — dates should be PROPERTIES on the relevant entity.
+- Do NOT extract metric values as entities UNLESS they represent a named KPI or target (e.g., "Return on Tangible Equity" is good, "$65.9bn" is not).
+- Prefer fewer, high-confidence entities (>= 0.7) over many low-confidence ones.
+- Every entity must have a clear, specific identity — if you can't give it a meaningful name beyond a generic word, don't extract it.
+
 ## Output Format
 Return your response as a JSON object with this EXACT structure:
 {{{{
@@ -209,7 +243,7 @@ Return your response as a JSON object with this EXACT structure:
 }}}}
 
 ## Quality Rules
-- Only extract what is clearly stated or strongly implied (confidence >= 0.5).
+- Only extract what is clearly stated or strongly implied (confidence >= 0.65).
 - Do NOT invent properties that are not mentioned or implied in the text.
 - Normalize all dates to YYYY-MM-DD where possible.
 - Use the MOST SPECIFIC entity type available (e.g., "Department" not "Organization" for a department).
@@ -231,10 +265,14 @@ Now re-read the text carefully and find ALL relationships between these entities
 Focus on:
 1. IMPLICIT connections (co-occurrence in same paragraph, shared context, logical inference)
 2. HIERARCHICAL relationships (PART_OF, BELONGS_TO, REPORTS_TO, CONTAINS)
-3. TEMPORAL relationships (PRECEDED_BY, RESULTED_IN, OCCURRED_ON)
-4. DEPENDENCY relationships (REQUIRES, DEPENDS_ON, USES_TOOL)
-5. ATTRIBUTION relationships (AUTHORED, CREATED, APPROVED, REVIEWED)
-6. Any entity that currently has 0 or 1 relationships — search harder for its connections
+3. OPERATIONAL relationships (OPERATES_IN, EMPLOYS, LAUNCHED)
+4. TEMPORAL relationships (PRECEDED_BY, RESULTED_IN, OCCURRED_ON)
+5. CAUSAL relationships (INFLUENCES, AFFECTED_BY, BENEFITS_FROM)
+6. FINANCIAL relationships (INVESTED_IN, SOLD, ACQUIRED)
+7. DEPENDENCY relationships (REQUIRES, DEPENDS_ON, USES_TOOL)
+8. ATTRIBUTION relationships (AUTHORED, CREATED, APPROVED, REVIEWED)
+9. CLASSIFICATION relationships (IS_TYPE_OF, EXCLUDES)
+10. Any entity that currently has 0 or 1 relationships — search harder for its connections
 
 Relationship type MUST be one of: {relationship_types}
 
@@ -505,15 +543,22 @@ class EntityExtractor:
         type_mappings = {
             "company": "Organization", "firm": "Organization", "agency": "Organization",
             "university": "Organization", "school": "Organization", "institute": "Organization",
+            "bank": "Organization", "institution": "Organization", "subsidiary": "Organization",
             "tool": "Technology", "software": "Technology", "framework": "Technology",
+            "platform": "Technology", "system": "Technology",
             "place": "Location", "city": "Location", "country": "Location",
-            "deadline": "Date", "time": "Date", "period": "Date",
+            "region": "Location", "market": "Location",
+            "deadline": "Date", "time": "Date", "period": "Date", "year": "Date",
             "job": "Role", "position": "Role", "title": "Role",
             "requirement": "Standard", "rule": "Policy",
-            "goal": "Deliverable", "objective": "Deliverable",
+            "goal": "Metric", "objective": "Metric", "target": "Metric",
+            "kpi": "Metric", "indicator": "Metric",
             "certification": "Qualification", "degree": "Qualification",
             "hazard": "Risk", "threat": "Risk",
-            "agreement": "Contract",
+            "agreement": "Contract", "deal": "Contract",
+            "service": "Product", "offering": "Product",
+            "initiative": "Project", "programme": "Project", "program": "Project",
+            "strategy": "Concept", "theme": "Concept",
             "other": "Concept",
         }
 
@@ -532,10 +577,13 @@ class EntityExtractor:
         """
         Ensure relationship type is in the allowed list.
         Maps unknown types to the closest match or 'REFERENCES' as a generic fallback.
+
+        Preserves Gemini's original label in 'original_type' when a mapping
+        or fallback is applied, so semantic nuance is not lost.
         """
         rel_type = relationship.get("type", "").strip().upper()
 
-        # Direct match
+        # Direct match — no mapping needed
         if rel_type in RELATIONSHIP_TYPES:
             relationship["type"] = rel_type
             return relationship
@@ -549,7 +597,7 @@ class EntityExtractor:
             "SUPERVISED_BY": "REPORTS_TO", "ANSWERS_TO": "REPORTS_TO",
             # -> LOCATED_IN
             "BASED_IN": "LOCATED_IN", "SITUATED_IN": "LOCATED_IN",
-            "HEADQUARTERED_IN": "LOCATED_IN",
+            "HEADQUARTERED_IN": "LOCATED_IN", "LOCATED_AT": "LOCATED_IN",
             # -> PART_OF
             "MEMBER_OF": "PART_OF", "SUBSET_OF": "PART_OF",
             "DIVISION_OF": "PART_OF", "INCLUDED_IN": "PART_OF",
@@ -558,6 +606,16 @@ class EntityExtractor:
             # -> HOLDS_ROLE
             "HAS_ROLE": "HOLDS_ROLE", "SERVES_AS": "HOLDS_ROLE",
             "ACTS_AS": "HOLDS_ROLE",
+
+            # ---- Operations & Presence ----
+            # -> OPERATES_IN
+            "ACTIVE_IN": "OPERATES_IN", "PRESENT_IN": "OPERATES_IN",
+            "HAS_PRESENCE_IN": "OPERATES_IN", "OPERATES_THROUGH": "OPERATES_IN",
+            "DOES_BUSINESS_IN": "OPERATES_IN",
+            # -> EMPLOYS
+            "HIRES": "EMPLOYS", "STAFFS": "EMPLOYS",
+            "HAS_EMPLOYEES": "EMPLOYS",
+            "RETIRED_FROM": "WORKS_FOR",  # Past employment relationship
 
             # ---- Identity & Skills ----
             # -> HAS_SKILL
@@ -584,12 +642,18 @@ class EntityExtractor:
             "DEVELOPED": "CREATED", "BUILT": "CREATED",
             "DESIGNED": "CREATED", "FOUNDED": "CREATED",
             "ESTABLISHED": "CREATED", "INITIATED": "CREATED",
+            "CREATES": "CREATED",
             # -> DELIVERED
             "COMPLETED": "DELIVERED", "FINISHED": "DELIVERED",
             "SUBMITTED": "DELIVERED", "PRODUCED": "DELIVERED",
             # -> OCCURRED_ON
             "HAPPENED_ON": "OCCURRED_ON", "SCHEDULED_FOR": "OCCURRED_ON",
-            "TOOK_PLACE_ON": "OCCURRED_ON",
+            "TOOK_PLACE_ON": "OCCURRED_ON", "START_DATE": "OCCURRED_ON",
+            "PUBLISHED_DATE": "OCCURRED_ON",
+            # -> LAUNCHED
+            "INTRODUCED": "LAUNCHED", "ROLLED_OUT": "LAUNCHED",
+            "RELEASED": "LAUNCHED", "DEBUTED": "LAUNCHED",
+            "UNVEILED": "LAUNCHED",
 
             # ---- Tasks & Dependencies ----
             # -> REQUIRES
@@ -603,9 +667,23 @@ class EntityExtractor:
             # -> RESULTED_IN
             "CAUSED": "RESULTED_IN", "LED_TO": "RESULTED_IN",
             "TRIGGERED": "RESULTED_IN", "PRODUCED_OUTCOME": "RESULTED_IN",
+            "RESULTED_FROM": "RESULTED_IN",  # Note: semantically inverse, but maps to same canonical type
             # -> MITIGATES
             "REDUCES": "MITIGATES", "ADDRESSES": "MITIGATES",
             "RESOLVES": "MITIGATES", "HANDLES": "MITIGATES",
+            "MITIGATED_BY": "MITIGATES",  # Inverse form
+
+            # ---- Causal & Influence ----
+            # -> INFLUENCES
+            "IMPACTS": "INFLUENCES", "SHAPES": "INFLUENCES",
+            "DRIVES": "INFLUENCES", "STRENGTHENED": "INFLUENCES",
+            "OPTIMIZES": "INFLUENCES", "EMBRACES": "INFLUENCES",
+            # -> AFFECTED_BY
+            "IMPACTED_BY": "AFFECTED_BY", "CHANGED_BY": "AFFECTED_BY",
+            "DRIVEN_BY": "AFFECTED_BY", "SHAPED_BY": "AFFECTED_BY",
+            # -> BENEFITS_FROM
+            "GAINS_FROM": "BENEFITS_FROM", "PROFITS_FROM": "BENEFITS_FROM",
+            "LEVERAGES": "BENEFITS_FROM",
 
             # ---- Goals & Alignment ----
             # -> ALIGNS_WITH
@@ -623,8 +701,19 @@ class EntityExtractor:
             "CONNECTS_TO": "INTEGRATES_WITH", "INTERFACES_WITH": "INTEGRATES_WITH",
             "COMPATIBLE_WITH": "INTEGRATES_WITH",
             # -> OWNS
-            "PURCHASED": "OWNS", "ACQUIRED": "OWNS",
-            "HAS_OWNERSHIP": "OWNS",
+            "PURCHASED": "OWNS", "HAS_OWNERSHIP": "OWNS",
+
+            # ---- Financial & Transactions ----
+            # -> INVESTED_IN
+            "FUNDED": "INVESTED_IN", "FINANCED": "INVESTED_IN",
+            "BACKED": "INVESTED_IN",
+            # -> SOLD
+            "DIVESTED": "SOLD", "DISPOSED_OF": "SOLD",
+            "PLANNED_SALE": "SOLD", "EXITED": "SOLD",
+            "OFFLOADED": "SOLD",
+            # -> ACQUIRED
+            "TOOK_OVER": "ACQUIRED", "MERGED_WITH": "ACQUIRED",
+            "BOUGHT": "ACQUIRED", "REPURCHASED": "ACQUIRED",
 
             # ---- External ----
             # -> SERVES
@@ -633,6 +722,17 @@ class EntityExtractor:
             # -> PARTNERS_WITH
             "COLLABORATES_WITH": "PARTNERS_WITH", "ALLIED_WITH": "PARTNERS_WITH",
             "JOINT_VENTURE_WITH": "PARTNERS_WITH", "CONTRACTED_WITH": "PARTNERS_WITH",
+            # -> ENGAGES_WITH
+            "INTERACTS_WITH": "ENGAGES_WITH", "LIAISES_WITH": "ENGAGES_WITH",
+            "COMMUNICATES_WITH": "ENGAGES_WITH", "CELEBRATES": "ENGAGES_WITH",
+
+            # ---- Classification ----
+            # -> IS_TYPE_OF
+            "IS_A": "IS_TYPE_OF", "CATEGORIZED_AS": "IS_TYPE_OF",
+            "CLASSIFIED_AS": "IS_TYPE_OF", "KIND_OF": "IS_TYPE_OF",
+            # -> EXCLUDES
+            "OMITS": "EXCLUDES", "REMOVES": "EXCLUDES",
+            "DROPS": "EXCLUDES", "LEAVES_OUT": "EXCLUDES",
 
             # ---- Documents & Auditing ----
             # -> AUTHORED
@@ -646,9 +746,10 @@ class EntityExtractor:
             "REVIEWED_BY": "REVIEWED", "ASSESSED_BY": "REVIEWED",
             "EVALUATED_BY": "REVIEWED", "AUDITED_BY": "REVIEWED",
             "EVALUATED": "REVIEWED", "ASSESSED": "REVIEWED",
+            "REVIEWS": "REVIEWED", "AUDITED": "REVIEWED",
             # -> CONTAINS
             "HAS": "CONTAINS", "INCLUDES": "CONTAINS",
-            "ENCOMPASSES": "CONTAINS",
+            "ENCOMPASSES": "CONTAINS", "ADDED": "CONTAINS",
             # -> REFERENCES
             "CITES": "REFERENCES", "REFERS_TO": "REFERENCES",
             "MENTIONS": "REFERENCES", "LINKS_TO": "REFERENCES",
@@ -669,9 +770,11 @@ class EntityExtractor:
         mapped = rel_mappings.get(rel_type)
         if mapped:
             logger.debug(f"Mapped relationship type '{rel_type}' -> '{mapped}'")
+            relationship["original_type"] = rel_type
             relationship["type"] = mapped
         else:
             logger.warning(f"Unknown relationship type '{rel_type}', defaulting to 'REFERENCES'")
+            relationship["original_type"] = rel_type
             relationship["type"] = "REFERENCES"
 
         return relationship
@@ -989,14 +1092,68 @@ class EntityExtractor:
                 failed_chunks.append(i)
                 logger.warning(f"Chunk {i + 1} failed: {result.get('error', 'Unknown error')}")
 
-        # Log final ratio
+        # --- Post-processing: filter noise ---
         entity_count = len(all_entities)
         rel_count = len(all_relationships)
+
+        MIN_ENTITY_CONFIDENCE = 0.65
+        MIN_REL_CONFIDENCE = 0.6
+
+        def _conf(item, default=0.8):
+            """Safely get confidence as float (Gemini sometimes returns strings)."""
+            try:
+                return float(item.get("confidence", default))
+            except (TypeError, ValueError):
+                return default
+
+        # 1. Filter low-confidence entities
+        filtered_entities = {
+            k: v for k, v in all_entities.items()
+            if _conf(v) >= MIN_ENTITY_CONFIDENCE
+        }
+
+        # 2. Build set of surviving entity names (lowercase) for relationship filtering
+        surviving_names = set()
+        for entity in filtered_entities.values():
+            surviving_names.add(entity.get("name", "").strip().lower())
+
+        # 3. Filter relationships: both endpoints must survive AND confidence threshold
+        filtered_rels = {}
+        for key, rel in all_relationships.items():
+            if _conf(rel) < MIN_REL_CONFIDENCE:
+                continue
+            src = rel.get("source", "").strip().lower()
+            tgt = rel.get("target", "").strip().lower()
+            if src in surviving_names and tgt in surviving_names:
+                filtered_rels[key] = rel
+
+        # 4. Remove isolated entities (no remaining relationships)
+        connected_names = set()
+        for rel in filtered_rels.values():
+            connected_names.add(rel.get("source", "").strip().lower())
+            connected_names.add(rel.get("target", "").strip().lower())
+
+        final_entities = {
+            k: v for k, v in filtered_entities.items()
+            if v.get("name", "").strip().lower() in connected_names
+        }
+
+        pruned_entities = entity_count - len(final_entities)
+        pruned_rels = rel_count - len(filtered_rels)
+        if pruned_entities > 0 or pruned_rels > 0:
+            logger.info(
+                f"Post-processing pruned {pruned_entities} low-quality entities "
+                f"and {pruned_rels} weak relationships"
+            )
+
+        # Log final ratio
+        entity_count = len(final_entities)
+        rel_count = len(filtered_rels)
         ratio = (rel_count / entity_count) if entity_count > 0 else 0
 
         result = {
-            "entities": list(all_entities.values()),
-            "relationships": list(all_relationships.values()),
+            "entities": list(final_entities.values()),
+            "relationships": list(filtered_rels.values()),
             "success": True,
             "chunks_processed": len(chunks),
             "chunks_failed": failed_chunks,
@@ -1008,9 +1165,9 @@ class EntityExtractor:
             f"({len(failed_chunks)} failed)"
         )
 
-        if ratio < 2.0:
+        if ratio < 1.0:
             logger.warning(
-                f"Relationship ratio ({ratio:.1f}:1) is below the recommended 2:1 target. "
+                f"Relationship ratio ({ratio:.1f}:1) is low. "
                 f"Consider adding more source documents or checking for failed chunks."
             )
 

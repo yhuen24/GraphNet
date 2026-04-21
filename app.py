@@ -373,10 +373,17 @@ def render_graph(msg):
     rels = msg.get("relationships", [])
     focal = msg.get("focal_entities", [])
 
+    # ── If no focal entities, derive them from query-result entities ──
+    # This prevents falling back to the full graph dump.
+    if not focal and entities:
+        focal = [e["name"] for e in entities[:15]]  # Cap at 15 focal seeds
+
     # ── Focused graph: only show entities + connections from the answer ──
     # Fetches relationships from Neo4j but ONLY keeps connections where
     # the connected entity is also mentioned in the answer text.
     # This ensures the graph mirrors exactly what the text discusses.
+    MAX_CONNECTED_PER_FOCAL = 8  # Prevent any single entity from sprawling
+
     if focal and hasattr(gn, 'graph_manager'):
         gm = gn.graph_manager
         entities = []
@@ -397,6 +404,7 @@ def render_graph(msg):
                 entities.append({"name": focal_name, "type": etype})
 
             # Fetch relationships, but only keep answer-relevant ones
+            connected_count = 0
             try:
                 relationships = gm.get_entity_relationships(focal_name)
                 for row in relationships:
@@ -416,6 +424,10 @@ def render_graph(msg):
                     if not in_answer and not is_focal:
                         continue
 
+                    # Limit sprawl per focal entity
+                    if connected_count >= MAX_CONNECTED_PER_FOCAL:
+                        break
+
                     if connected not in seen_names:
                         seen_names.add(connected)
                         ctype = str(labels[0]) if labels else "Other"
@@ -426,6 +438,7 @@ def render_graph(msg):
                         "target": connected,
                         "type": rel_type,
                     })
+                    connected_count += 1
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning(
@@ -433,16 +446,7 @@ def render_graph(msg):
                 )
 
     if not entities and not rels:
-        # Fall back to fetching full graph
-        try:
-            fname = gn.visualize_graph(limit=80)
-            if os.path.exists(fname):
-                with open(fname, "r", encoding="utf-8") as fh:
-                    components.html(fh.read(), height=620, scrolling=True)
-            else:
-                st.info("No graph data available yet.")
-        except Exception as e:
-            st.error(f"Visualisation error: {e}")
+        st.info("No graph data for this query. Try asking about specific entities or topics.")
         return
 
     # Build a mini vis with pyvis directly
@@ -510,15 +514,21 @@ def render_graph(msg):
             return rel_type.replace("_", " ").lower()
 
         def _fetch_entity_info(name):
-            """Pull description, source, AND type from the graph."""
-            info = {"description": "", "source": "", "type": ""}
+            """Pull description, source, type, AND all properties from the graph."""
+            info = {"description": "", "source": "", "type": "", "properties": {}}
+            # Keys to exclude from the properties display
+            SKIP_KEYS = {"name", "canonical_name", "created", "updated",
+                         "description", "source", "type", "confidence"}
             try:
-                # Try get_entity first (works for both Neo4j and embedded)
                 entity_data = gn.graph_manager.get_entity(name)
                 if entity_data:
                     info["description"] = entity_data.get("description", "")
                     info["source"] = entity_data.get("source", "")
                     info["type"] = entity_data.get("type", "")
+                    # Grab ALL remaining properties (value, unit, period, etc.)
+                    for k, v in entity_data.items():
+                        if k not in SKIP_KEYS and v not in (None, "", [], {}):
+                            info["properties"][k] = v
 
                 # Fallback: direct graph node lookup by name (embedded mode)
                 if not info["type"]:
@@ -529,6 +539,10 @@ def render_graph(msg):
                             info["description"] = nd.get("description", "")
                         if not info["source"]:
                             info["source"] = nd.get("source", "")
+                        if not info["properties"]:
+                            for k, v in nd.items():
+                                if k not in SKIP_KEYS and v not in (None, "", [], {}):
+                                    info["properties"][k] = v
             except Exception:
                 pass
             return info
@@ -564,6 +578,7 @@ def render_graph(msg):
                     "color": color,
                     "description": info["description"],
                     "source": info["source"],
+                    "properties": info["properties"],
                     "connections": [],
                 }
 
@@ -763,6 +778,20 @@ def render_graph(msg):
     // Description
     if (info.description) {
       html += '<div class="node-desc">' + escHtml(info.description) + '</div>';
+    }
+    
+    // Properties (value, unit, period, etc.)
+    var props = info.properties || {};
+    var propKeys = Object.keys(props);
+    if (propKeys.length > 0) {
+      html += '<div class="section-label">Properties</div>';
+      for (var i = 0; i < propKeys.length; i++) {
+        var key = propKeys[i];
+        var val = props[key];
+        // Prettify key: "start_date" → "Start Date"
+        var label = key.replace(/_/g, " ").replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+        html += '<div class="conn-sentence"><span style="color:#6b6b78;">' + escHtml(label) + ':</span> <span class="conn-highlight">' + escHtml(String(val)) + '</span></div>';
+      }
     }
 
     // Connections as readable sentences
