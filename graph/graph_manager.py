@@ -245,7 +245,9 @@ class GraphManager:
                 RETURN type(r) as relationship,
                        other.name as entity,
                        labels(other) as labels,
-                       other.source as source
+                       other.source as source,
+                       startNode(r).name as rel_source,
+                       endNode(r).name as rel_target
                 LIMIT 50
                 """
 
@@ -377,6 +379,7 @@ class GraphManager:
             # Build nodes & edges from records
             nodes_map = {}
             edges = []
+            seen_edges = set()
             for rec in records:
                 nname = rec.get("node_name")
                 if nname and nname not in nodes_map:
@@ -395,12 +398,15 @@ class GraphManager:
                 tgt = rec.get("tgt_name")
                 rtype = rec.get("rel_type")
                 if src and tgt and rtype:
-                    edges.append({
-                        "source": src,
-                        "target": tgt,
-                        "type": rtype,
-                        "properties": {},
-                    })
+                    edge_key = (src, tgt, rtype)
+                    if edge_key not in seen_edges:
+                        seen_edges.add(edge_key)
+                        edges.append({
+                            "source": src,
+                            "target": tgt,
+                            "type": rtype,
+                            "properties": {},
+                        })
 
             return {"nodes": list(nodes_map.values()), "edges": edges}
         except Exception as e:

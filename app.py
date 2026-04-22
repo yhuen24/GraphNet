@@ -389,6 +389,7 @@ def render_graph(msg):
         entities = []
         rels = []
         seen_names = set()
+        seen_edges = set()  # Deduplicate edges by (source, target, type)
         answer_lower = msg.get("content", "").lower()
         focal_lower_set = {f.strip().lower() for f in focal}
 
@@ -433,11 +434,19 @@ def render_graph(msg):
                         ctype = str(labels[0]) if labels else "Other"
                         entities.append({"name": connected, "type": ctype})
 
-                    rels.append({
-                        "source": focal_name,
-                        "target": connected,
-                        "type": rel_type,
-                    })
+                    # Use actual relationship direction from Neo4j
+                    # instead of assuming focal_name is always the source
+                    actual_source = row.get("rel_source", focal_name)
+                    actual_target = row.get("rel_target", connected)
+
+                    edge_key = (actual_source, actual_target, rel_type)
+                    if edge_key not in seen_edges:
+                        seen_edges.add(edge_key)
+                        rels.append({
+                            "source": actual_source,
+                            "target": actual_target,
+                            "type": rel_type,
+                        })
                     connected_count += 1
             except Exception as e:
                 import logging
