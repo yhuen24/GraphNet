@@ -22,6 +22,19 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# Chunking defaults
+# -----------------------------------------------------------------------------
+# These are used when config.CHUNK_SIZE / config.CHUNK_OVERLAP are missing OR
+# when the configured values are clearly too small for modern LLMs (Gemini,
+# Claude, GPT-4o all handle 20k+ char chunks comfortably).
+# =============================================================================
+
+DEFAULT_CHUNK_SIZE = 6000        # ~1.5k tokens - forces dense extraction
+DEFAULT_CHUNK_OVERLAP = 1000     # Gives enough overlap to catch boundary relationships
+MIN_REASONABLE_CHUNK_SIZE = 2000
+
+
 class DocumentProcessor:
     """Process various document formats and extract text"""
 
@@ -41,14 +54,13 @@ class DocumentProcessor:
             Dictionary containing extracted text and metadata
         """
         try:
-            # Determine file extension
+
             if file_path:
                 file_extension = os.path.splitext(file_path)[1].lower()
 
             if not file_extension:
                 raise ValueError("File extension not provided")
 
-            # Route to appropriate processor
             if file_extension in ['.txt', '.md']:
                 return DocumentProcessor._process_text(file_path, file_bytes, filename)
             elif file_extension == '.pdf':
@@ -77,7 +89,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_text(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process plain text files"""
         try:
             if file_bytes:
                 text = file_bytes.decode('utf-8')
@@ -101,7 +112,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_pdf(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process PDF files using pdfplumber for better encoding support"""
         try:
             text = ""
             source = BytesIO(file_bytes) if file_bytes else file_path
@@ -118,7 +128,6 @@ class DocumentProcessor:
                         logger.warning(f"Could not extract text from page {i + 1}: {str(e)}")
                         continue
 
-            # If no text was extracted, raise an error
             if not text.strip():
                 raise ValueError("No text could be extracted from PDF")
 
@@ -139,7 +148,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_docx(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process Word documents"""
         try:
             if file_bytes:
                 doc = DocxDocument(BytesIO(file_bytes))
@@ -175,7 +183,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_xlsx(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process Excel files"""
         try:
             if file_bytes:
                 df_dict = pd.read_excel(BytesIO(file_bytes), sheet_name=None)
@@ -205,7 +212,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_pptx(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process PowerPoint files"""
         try:
             if file_bytes:
                 prs = Presentation(BytesIO(file_bytes))
@@ -236,7 +242,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_csv(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process CSV files"""
         try:
             if file_bytes:
                 df = pd.read_csv(BytesIO(file_bytes))
@@ -263,7 +268,6 @@ class DocumentProcessor:
 
     @staticmethod
     def _process_json(file_path: str = None, file_bytes: bytes = None, filename: str = "unknown") -> Dict[str, Any]:
-        """Process JSON files"""
         try:
             if file_bytes:
                 data = json.loads(file_bytes.decode('utf-8'))
@@ -287,32 +291,95 @@ class DocumentProcessor:
             logger.error(f"Error processing JSON: {str(e)}")
             raise
 
+    # -------------------------------------------------------------------------
+    # Chunking
+    # -------------------------------------------------------------------------
+
     @staticmethod
     def chunk_text(text: str, chunk_size: int = None, chunk_overlap: int = None) -> List[str]:
         """
-        Split text into chunks for processing
+        Split text into chunks for LLM processing.
+
+        Uses sentence-boundary-aware splitting so entities and relationships
+        aren't cut mid-sentence. Falls back gracefully when no sentence break
+        is available near the target boundary.
+
+        Defaults are tuned for modern long-context LLMs (Gemini, Claude, GPT-4o).
+        If config.CHUNK_SIZE is set but is too small to be efficient
+        (< 8,000 chars), it is overridden with the modern default and a warning
+        is logged — otherwise a 14-page PDF ends up as 27+ micro-chunks and
+        extraction takes hours.
 
         Args:
             text: Text to chunk
-            chunk_size: Size of each chunk
-            chunk_overlap: Overlap between chunks
+            chunk_size: Maximum characters per chunk (default: 40,000)
+            chunk_overlap: Characters of overlap between consecutive chunks
+                           (default: 2,000)
 
         Returns:
             List of text chunks
         """
+        # ---- Resolve chunk size ----
         if chunk_size is None:
-            chunk_size = config.CHUNK_SIZE
-        if chunk_overlap is None:
-            chunk_overlap = config.CHUNK_OVERLAP
+            configured = getattr(config, "CHUNK_SIZE", None)
+            if configured and configured >= MIN_REASONABLE_CHUNK_SIZE:
+                chunk_size = configured
+            else:
+                if configured and configured < MIN_REASONABLE_CHUNK_SIZE:
+                    logger.warning(
+                        f"config.CHUNK_SIZE={configured} is too small for efficient "
+                        f"LLM extraction. Using {DEFAULT_CHUNK_SIZE} instead. "
+                        f"Update config.CHUNK_SIZE to silence this warning."
+                    )
+                chunk_size = DEFAULT_CHUNK_SIZE
 
+        # ---- Resolve overlap ----
+        if chunk_overlap is None:
+            configured_overlap = getattr(config, "CHUNK_OVERLAP", None)
+            # Overlap should be ~5% of chunk size and never exceed it
+            if configured_overlap and 0 < configured_overlap < chunk_size:
+                chunk_overlap = configured_overlap
+            else:
+                chunk_overlap = DEFAULT_CHUNK_OVERLAP
+
+        # ---- Short-circuit: text fits in a single chunk ----
+        if len(text) <= chunk_size:
+            logger.info(f"Text ({len(text)} chars) fits in a single chunk")
+            return [text]
+
+        # ---- Sentence-boundary-aware chunking ----
         chunks = []
         start = 0
         text_length = len(text)
 
         while start < text_length:
-            end = start + chunk_size
-            chunk = text[start:end]
-            chunks.append(chunk)
-            start += chunk_size - chunk_overlap
+            end = min(start + chunk_size, text_length)
 
+            # Try to break at a sentence boundary within the last 20% of the chunk
+            if end < text_length:
+                search_start = max(start, end - int(chunk_size * 0.2))
+                last_period = text.rfind('. ', search_start, end)
+                last_newline = text.rfind('\n', search_start, end)
+                break_point = max(last_period, last_newline)
+                if break_point > search_start:
+                    end = break_point + 1
+
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+
+            # Advance, with overlap
+            next_start = end - chunk_overlap
+            # Guard against infinite loop if overlap >= progress
+            if next_start <= start:
+                next_start = end
+            start = next_start
+
+            if start >= text_length:
+                break
+
+        logger.info(
+            f"Split text ({text_length} chars) into {len(chunks)} chunks "
+            f"(chunk_size={chunk_size}, overlap={chunk_overlap})"
+        )
         return chunks

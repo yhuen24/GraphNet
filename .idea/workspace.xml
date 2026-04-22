@@ -4,11 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="e855eedd-5383-4d38-b1b2-24b93f48e271" name="Changes" comment="working">
+    <list default="true" id="e855eedd-5383-4d38-b1b2-24b93f48e271" name="Changes" comment="working latest">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ai/entity_extractor.py" beforeDir="false" afterPath="$PROJECT_DIR$/ai/entity_extractor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ai/query_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/ai/query_agent.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -23,6 +20,11 @@
     </option>
   </component>
   <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="master" />
+      </map>
+    </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
   <component name="GitHubPullRequestSearchHistory">{
@@ -54,21 +56,26 @@
   <component name="PropertiesComponent">{
   &quot;keyToString&quot;: {
     &quot;Python.app.executor&quot;: &quot;Run&quot;,
+    &quot;Python.neo4j_test.executor&quot;: &quot;Run&quot;,
+    &quot;Python.person_relation.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
     &quot;ai.playground.ignore.import.keys.banner.in.settings&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;dev&quot;,
     &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
     &quot;last_opened_file_path&quot;: &quot;C:/Users/ashyu/PycharmProjects/GraphNet/graph&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
+    &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
 }</component>
@@ -77,6 +84,7 @@
       <recent name="C:\Users\ashyu\PycharmProjects\GraphNet\graph" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Users\ashyu\PycharmProjects\GraphNet\test_folder" />
       <recent name="D:\PyCharm 2023.3.4\GraphNet" />
       <recent name="D:\PyCharm 2023.3.4\GraphNet\graph" />
       <recent name="D:\PyCharm 2023.3.4\GraphNet\ai" />
@@ -104,7 +112,22 @@
       <workItem from="1769713226180" duration="2234000" />
       <workItem from="1769720961957" duration="427000" />
       <workItem from="1769721413073" duration="7352000" />
-      <workItem from="1769792889730" duration="2847000" />
+      <workItem from="1769792889730" duration="15721000" />
+      <workItem from="1769955769312" duration="729000" />
+      <workItem from="1769977961461" duration="2377000" />
+      <workItem from="1770206659844" duration="2721000" />
+      <workItem from="1770225425447" duration="1432000" />
+      <workItem from="1776190168453" duration="7541000" />
+      <workItem from="1776203828884" duration="12196000" />
+      <workItem from="1776268615105" duration="17258000" />
+      <workItem from="1776372666911" duration="9735000" />
+      <workItem from="1776437570580" duration="10520000" />
+      <workItem from="1776632763613" duration="9034000" />
+      <workItem from="1776647679528" duration="788000" />
+      <workItem from="1776648626216" duration="61000" />
+      <workItem from="1776651809653" duration="5773000" />
+      <workItem from="1776701599807" duration="20156000" />
+      <workItem from="1776801805640" duration="161000" />
     </task>
     <task id="LOCAL-00001" summary="semi working version">
       <option name="closed" value="true" />
@@ -122,18 +145,113 @@
       <option name="project" value="LOCAL" />
       <updated>1769728826050</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="working">
+      <option name="closed" value="true" />
+      <created>1769796637747</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1769796637747</updated>
+    </task>
+    <task id="LOCAL-00004" summary="working">
+      <option name="closed" value="true" />
+      <created>1769811318055</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1769811318055</updated>
+    </task>
+    <task id="LOCAL-00005" summary="working">
+      <option name="closed" value="true" />
+      <created>1770210290330</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1770210290330</updated>
+    </task>
+    <task id="LOCAL-00006" summary="working latest">
+      <option name="closed" value="true" />
+      <created>1776199795039</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1776199795039</updated>
+    </task>
+    <task id="LOCAL-00007" summary="working latest">
+      <option name="closed" value="true" />
+      <created>1776282897484</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1776282897484</updated>
+    </task>
+    <task id="LOCAL-00008" summary="working latest">
+      <option name="closed" value="true" />
+      <created>1776376154023</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1776376154023</updated>
+    </task>
+    <task id="LOCAL-00009" summary="working latest">
+      <option name="closed" value="true" />
+      <created>1776445223933</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1776445223933</updated>
+    </task>
+    <task id="LOCAL-00010" summary="working latest">
+      <option name="closed" value="true" />
+      <created>1776458417938</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1776458417938</updated>
+    </task>
+    <task id="LOCAL-00011" summary="working latest">
+      <option name="closed" value="true" />
+      <created>1776659506477</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1776659506477</updated>
+    </task>
+    <task id="LOCAL-00012" summary="working latest">
+      <option name="closed" value="true" />
+      <created>1776729653013</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1776729653013</updated>
+    </task>
+    <option name="localTasksCounter" value="13" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
   </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="semi working version" />
     <MESSAGE value="working" />
-    <option name="LAST_COMMIT_MESSAGE" value="working" />
+    <MESSAGE value="working latest" />
+    <option name="LAST_COMMIT_MESSAGE" value="working latest" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/GraphNet$app.coverage" NAME="app Coverage Results" MODIFIED="1769722492998" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/GraphNet$neo4j_test.coverage" NAME="neo4j_test Coverage Results" MODIFIED="1776732851593" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/test_folder" />
+    <SUITE FILE_PATH="coverage/GraphNet$person_relation.coverage" NAME="person_relation Coverage Results" MODIFIED="1776716944952" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/test_folder" />
+    <SUITE FILE_PATH="coverage/GraphNet$test_connection.coverage" NAME="test_connection Coverage Results" MODIFIED="1776105300112" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
   </component>
 </project>

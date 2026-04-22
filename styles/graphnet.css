@@ -1,0 +1,205 @@
+/* ==========================================================================
+   GraphNet — UI Stylesheet (v4 — hybrid scroll + sticky input)
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+/* ---------- Design tokens ---------- */
+:root {
+    --bg:         #0f0f11;
+    --surface:    #17171a;
+    --surface2:   #1e1e23;
+    --border:     #2a2a30;
+    --text:       #e8e8ec;
+    --muted:      #6b6b78;
+    --accent:     #7c6af7;
+    --accent2:    #5eead4;
+    --user-bg:    #1e1e2e;
+    --ai-bg:      #17171a;
+    --radius:     12px;
+    --font:       'DM Sans', sans-serif;
+    --mono:       'DM Mono', monospace;
+    --max-w:      780px;
+
+    --topbar-h:   52px;
+    --inputbar-h: 80px;
+}
+
+/* ========================================================================== */
+/* Base */
+/* ========================================================================== */
+html, body, [class*="css"] {
+    font-family: var(--font) !important;
+    background-color: var(--bg) !important;
+    color: var(--text) !important;
+}
+
+.block-container {
+    padding: 0 !important;
+    max-width: 100% !important;
+}
+
+/* Hide Streamlit chrome */
+#MainMenu, footer, header { display: none !important; }
+
+/* ========================================================================== */
+/* Layout (IMPORTANT FIX) */
+/* ========================================================================== */
+
+/* Allow normal scrolling */
+[data-testid="stAppViewContainer"] > section.main {
+    overflow-y: auto !important;
+    height: 100vh !important;
+}
+
+/* REMOVE problematic stretching */
+[data-testid="stMainBlockContainer"] {
+    min-height: auto !important;
+}
+
+/* ========================================================================== */
+/* Top bar (sticky) */
+/* ========================================================================== */
+.chat-top-bar {
+    position: sticky;
+    top: 0;
+    z-index: 999;
+
+    height: var(--topbar-h);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 2rem;
+
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+}
+
+/* ========================================================================== */
+/* Messages container (natural flow + scrollable page) */
+/* ========================================================================== */
+.messages-scroll {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: var(--inputbar-h);
+}
+
+/* ========================================================================== */
+/* Input bar (sticky bottom — key fix) */
+/* ========================================================================== */
+.input-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 999;
+
+    min-height: var(--inputbar-h);
+    display: flex;
+    align-items: center;
+    padding: 0.6rem 2rem;
+
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+}
+
+.input-bar-inner {
+    width: 100%;
+    max-width: var(--max-w);
+    margin: 0 auto;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+/* ========================================================================== */
+/* Sidebar */
+/* ========================================================================== */
+[data-testid="stSidebar"] {
+    background: var(--surface) !important;
+    border-right: 1px solid var(--border) !important;
+}
+
+/* ========================================================================== */
+/* Messages */
+/* ========================================================================== */
+.message-row {
+    display: flex;
+    gap: 14px;
+    padding: 0.5rem 2rem;
+    max-width: var(--max-w);
+    margin: 0 auto;
+    width: 100%;
+}
+
+.message-row.user { flex-direction: row-reverse; }
+
+.avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.avatar.ai {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff;
+}
+
+.avatar.user {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+}
+
+.bubble {
+    max-width: 78%;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
+    font-size: 0.88rem;
+    line-height: 1.6;
+}
+
+.bubble.ai {
+    background: var(--ai-bg);
+    border: 1px solid var(--border);
+}
+
+.bubble.user {
+    background: var(--user-bg);
+}
+
+/* ========================================================================== */
+/* Welcome */
+/* ========================================================================== */
+.welcome {
+    margin: auto;
+    text-align: center;
+}
+
+/* ========================================================================== */
+/* Inputs */
+/* ========================================================================== */
+.stTextInput input {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 14px !important;
+    padding: 1rem !important;
+    height: 54px !important;
+}
+
+.stButton button {
+    height: 54px !important;
+    border-radius: 14px !important;
+}
+
+
+/* ========================================================================== */
+/* Scrollbar */
+/* ========================================================================== */
+::-webkit-scrollbar {
+    width: 6px;
+}
+::-webkit-scrollbar-thumb {
+    background: var(--muted);
+    border-radius: 4px;
+}

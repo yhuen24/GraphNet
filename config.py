@@ -27,8 +27,8 @@ class Config:
     
     # Application Settings
     MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
-    CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1000"))
-    CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
+    CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "40000"))
+    CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "2000"))
     
     # Supported file formats
     SUPPORTED_FORMATS = [
