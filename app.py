@@ -16,6 +16,7 @@ from chat_store import (
     delete_session,
     new_session,
     get_session,
+    ensure_user_id,
 )
 
 # ── Page config ──────────────────────────────────────────────────────────────
@@ -87,6 +88,7 @@ st.markdown("""
 
 # ── Session state ──────────────────────────────────────────────────────────────
 def init_state():
+    ensure_user_id()
     defaults = {
         "graphnet":       None,
         "initialized":    False,
