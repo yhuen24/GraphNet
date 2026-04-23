@@ -1,116 +1,69 @@
 """
-chat_store.py — GraphNet chat persistence layer.
+chat_store.py — GraphNet chat persistence layer (session-scoped).
 
-Stores all chat sessions in a single JSON file on disk so conversations
-survive page refreshes and server restarts.
+Stores all chat sessions in Streamlit's per-browser session_state so that
+each visitor gets their own isolated chat history. Chats will not persist
+across page refreshes, but — critically — users can no longer see each
+other's conversations.
 
-File layout  (.graphnet_sessions.json):
-{
-    "sessions": [
-        {
-            "id":       "1718000000.123",
-            "title":    "First user message (truncated)",
-            "created":  "2024-06-10T12:00:00",
-            "updated":  "2024-06-10T12:05:00",
-            "messages": [
-                {
-                    "role":          "user" | "assistant",
-                    "content":       "...",
-                    "msg_id":        "1718000000.123_u",
-                    "entities":      [...],
-                    "relationships": [...]
-                },
-                ...
-            ]
-        },
-        ...
-    ]
-}
+The public API is identical to the previous disk-backed version, so
+app.py requires NO changes.
 """
 
-import json
-import os
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-# Where sessions are stored. Can be overridden via the env var GRAPHNET_STORE.
-DEFAULT_STORE = Path(os.getenv("GRAPHNET_STORE", ".graphnet_sessions.json"))
+import streamlit as st
 
 
-# ── Low-level I/O ──────────────────────────────────────────────────────────────
+# ── Internal helpers ───────────────────────────────────────────────────────────
 
-def _read_store(path: Path = DEFAULT_STORE) -> Dict[str, Any]:
-    """Load the store from disk. Returns empty structure on first run."""
-    if not path.exists():
-        return {"sessions": []}
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except (json.JSONDecodeError, OSError):
-        # Corrupt file — start fresh rather than crash.
-        return {"sessions": []}
+def _get_store() -> List[Dict[str, Any]]:
+    """Return the sessions list from session_state, creating it if needed."""
+    if "_chat_sessions" not in st.session_state:
+        st.session_state["_chat_sessions"] = []
+    return st.session_state["_chat_sessions"]
 
 
-def _write_store(data: Dict[str, Any], path: Path = DEFAULT_STORE) -> None:
-    """Atomically write the store to disk (write-then-rename)."""
-    tmp = path.with_suffix(".tmp")
-    try:
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False, indent=2)
-        tmp.replace(path)
-    except OSError:
-        # Best-effort — if we can't write, don't crash the app.
-        pass
+# ── Public API (same signatures as the old disk-backed version) ────────────────
 
-
-# ── Public API ─────────────────────────────────────────────────────────────────
-
-def load_all_sessions(path: Path = DEFAULT_STORE) -> List[Dict[str, Any]]:
+def load_all_sessions(path=None) -> List[Dict[str, Any]]:
     """
-    Return all sessions from disk, most-recently-updated first.
-    Each session dict has: id, title, created, updated, messages.
+    Return all sessions, most-recently-updated first.
+    `path` is accepted but ignored (kept for API compatibility).
     """
-    data = _read_store(path)
-    sessions = data.get("sessions", [])
-    # Sort newest-updated first
+    sessions = list(_get_store())
     sessions.sort(key=lambda s: s.get("updated", ""), reverse=True)
     return sessions
 
 
-def save_session(session: Dict[str, Any], path: Path = DEFAULT_STORE) -> None:
-    """
-    Upsert a session by its id.
-    Adds 'updated' timestamp automatically.
-    """
-    data = _read_store(path)
-    sessions = data.get("sessions", [])
-
+def save_session(session: Dict[str, Any], path=None) -> None:
+    """Upsert a session by its id."""
+    sessions = _get_store()
     session["updated"] = datetime.now().isoformat(timespec="seconds")
 
-    # Replace if exists, otherwise prepend
+    if "created" not in session:
+        session["created"] = session["updated"]
+
     for i, s in enumerate(sessions):
         if s["id"] == session["id"]:
             sessions[i] = session
-            break
-    else:
-        sessions.insert(0, session)
-
-    data["sessions"] = sessions
-    _write_store(data, path)
+            return
+    sessions.insert(0, session)
 
 
-def delete_session(session_id: str, path: Path = DEFAULT_STORE) -> None:
+def delete_session(session_id: str, path=None) -> None:
     """Remove a session permanently."""
-    data = _read_store(path)
-    data["sessions"] = [s for s in data["sessions"] if s["id"] != session_id]
-    _write_store(data, path)
+    store = _get_store()
+    st.session_state["_chat_sessions"] = [
+        s for s in store if s["id"] != session_id
+    ]
 
 
 def new_session(first_message: str = "") -> Dict[str, Any]:
     """
-    Create a blank session dict (not yet saved to disk).
+    Create a blank session dict (not yet saved).
     Call save_session() after adding the first message.
     """
     now = datetime.now().isoformat(timespec="seconds")
@@ -124,21 +77,18 @@ def new_session(first_message: str = "") -> Dict[str, Any]:
     }
 
 
-def get_session(session_id: str, path: Path = DEFAULT_STORE) -> Optional[Dict[str, Any]]:
+def get_session(session_id: str, path=None) -> Optional[Dict[str, Any]]:
     """Fetch a single session by id, or None if not found."""
-    for s in load_all_sessions(path):
+    for s in _get_store():
         if s["id"] == session_id:
             return s
     return None
 
 
-def rename_session(session_id: str, new_title: str,
-                   path: Path = DEFAULT_STORE) -> None:
+def rename_session(session_id: str, new_title: str, path=None) -> None:
     """Update just the title of a session."""
-    data = _read_store(path)
-    for s in data["sessions"]:
+    for s in _get_store():
         if s["id"] == session_id:
             s["title"] = new_title
             s["updated"] = datetime.now().isoformat(timespec="seconds")
-            break
-    _write_store(data, path)
+            return
