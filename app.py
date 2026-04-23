@@ -393,8 +393,15 @@ def render_graph(msg):
         answer_lower = msg.get("content", "").lower()
         focal_lower_set = {f.strip().lower() for f in focal}
 
+        # Only expand relationships for the PRIMARY query targets (first 2).
+        # Other focal entities appear as leaf nodes only if they're directly
+        # connected to a primary target — this keeps the graph at 1-hop.
+        PRIMARY_FOCAL_LIMIT = 2
+        primary_focal = focal[:PRIMARY_FOCAL_LIMIT]
+        secondary_focal = focal[PRIMARY_FOCAL_LIMIT:]
+
+        # Add ALL focal entities as nodes (but only primary ones get expanded)
         for focal_name in focal:
-            # Add the focal entity itself
             if focal_name not in seen_names:
                 seen_names.add(focal_name)
                 entity_data = gm.get_entity(focal_name)
@@ -404,7 +411,8 @@ def render_graph(msg):
                              or next(iter(entity_data.get("labels", ["Other"])), "Other"))
                 entities.append({"name": focal_name, "type": etype})
 
-            # Fetch relationships, but only keep answer-relevant ones
+        # Only fetch and expand relationships for primary focal entities
+        for focal_name in primary_focal:
             connected_count = 0
             try:
                 relationships = gm.get_entity_relationships(focal_name)
@@ -435,7 +443,6 @@ def render_graph(msg):
                         entities.append({"name": connected, "type": ctype})
 
                     # Use actual relationship direction from Neo4j
-                    # instead of assuming focal_name is always the source
                     actual_source = row.get("rel_source", focal_name)
                     actual_target = row.get("rel_target", connected)
 
@@ -453,6 +460,19 @@ def render_graph(msg):
                 logging.getLogger(__name__).warning(
                     f"Could not fetch relationships for '{focal_name}': {e}"
                 )
+
+        # Remove entities that ended up with no connections (isolated nodes)
+        # Primary focal entities are always kept even if isolated.
+        primary_lower = {f.strip().lower() for f in primary_focal}
+        connected_names = set()
+        for r in rels:
+            connected_names.add(r["source"])
+            connected_names.add(r["target"])
+        entities = [
+            e for e in entities
+            if e["name"] in connected_names
+            or e["name"].strip().lower() in primary_lower
+        ]
 
     if not entities and not rels:
         st.info("No graph data for this query. Try asking about specific entities or topics.")
