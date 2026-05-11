@@ -1040,7 +1040,7 @@ class EntityExtractor:
         for i, chunk in enumerate(chunks):
             logger.info(f"Processing chunk {i + 1}/{len(chunks)} ({len(chunk)} chars)")
 
-            # Rate-limit friendly delay between chunks (skip first)
+            # Rate-limit friendly delay between chunks
             if i > 0:
                 time.sleep(self._inter_chunk_delay)
 
@@ -1387,7 +1387,7 @@ class SimpleEntityExtractor:
         "PERCENT": "Metric",
         "QUANTITY": "Metric",
         "FAC": "Location",
-        "NORP": "Organization",
+        "CORP": "Organization",
     }
 
     @classmethod

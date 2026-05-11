@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# REASONING SYSTEM PROMPT — the core of the "smart answering" upgrade
+# REASONING SYSTEM PROMPT
 # ═════════════════════════════════════════════════════════════════════════════
 
 REASONING_SYSTEM_PROMPT = """You are GraphNet's AI analyst. You have access to two types of evidence:
@@ -254,14 +254,12 @@ class QueryAgent:
         # ──────────────────────────────────────────────────────────────────
         document_chunks = self._retrieve_document_context(query, search_terms, sources)
 
-        # Step 6 — NEW: reasoning-based explanation (not just description)
+        # Step 6 — NEW: reasoning-based explanation
         explanation = self._reason_over_evidence(
             query, all_results, document_chunks, sources
         )
 
-        # ── Derive focal entities from the LLM's actual answer ──────────
-        # so the graph only shows nodes the text response discusses,
-        # not every entity the broad semantic search touched.
+        # Derive focal entities from the LLM's actual answer
         answer_focal = []
         if explanation:
             explanation_lower = explanation.lower()
@@ -741,7 +739,7 @@ If the question is about listing all of a type, return NONE."""),
         return None
 
     # =====================================================================
-    # Entity info & suggestions (unchanged)
+    # Entity info & suggestions
     # =====================================================================
 
     def get_entity_info(self, entity_name: str) -> Dict[str, Any]:
@@ -767,34 +765,16 @@ If the question is about listing all of a type, return NONE."""),
             source = entity_data.get("source", "Unknown")
             prompt = ChatPromptTemplate.from_messages([
                 SystemMessage(content="""Summarize this entity from a knowledge graph.
-Mention properties, key relationships, and the source document."""),
-                HumanMessage(content=f"""
-Entity: {entity_name}
-Properties: {entity_data}
-Relationships: {relationships}
-Source: {source}"""),
-            ])
+                Mention properties, key relationships, and the source document."""),
+                                HumanMessage(content=f"""
+                Entity: {entity_name}
+                Properties: {entity_data}
+                Relationships: {relationships}
+                Source: {source}"""),
+                            ])
             response = self.llm.invoke(prompt.format_messages())
             return self._get_text(response).strip()
         except Exception as e:
             logger.error(f"Error summarizing: {e}")
             return f"{entity_name} — {len(relationships)} relationships"
 
-    def get_suggestions(self, partial_query: str) -> List[str]:
-        suggestions = [
-            "Show me all entities",
-            "Find all organizations",
-            "What are the relationships for [entity name]?",
-            "Find entities related to [entity name]",
-            "Show all people in the graph",
-            "List all locations",
-            "What does [entity name] relate to?",
-            "Find connections between [entity1] and [entity2]",
-            "Is [topic] covered by [policy name]?",
-            "What does the policy say about [topic]?",
-            "Compare [entity A] with [entity B]",
-        ]
-        if partial_query:
-            suggestions = [s for s in suggestions
-                           if partial_query.lower() in s.lower()]
-        return suggestions[:5]
