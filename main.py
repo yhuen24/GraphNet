@@ -210,7 +210,7 @@ class GraphNet:
             logger.info(f"Split into {len(chunks)} chunks")
 
             # ══════════════════════════════════════════════════════════════
-            # Step 2.5 (NEW): Store chunks for later retrieval by QueryAgent
+            # Store chunks for later retrieval by QueryAgent
             # ══════════════════════════════════════════════════════════════
             chunks_stored = 0
             if self.chunk_store:
